@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Conversation, AppSettings, DEFAULT_SETTINGS, JewelMetrics, DEFAULT_JEWEL_METRICS, ModelInfo } from './types';
+import { Conversation, AppSettings, DEFAULT_SETTINGS, JewelMetrics, DEFAULT_JEWEL_METRICS, ModelInfo, Gift } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export function useAppStore() {
@@ -9,6 +9,7 @@ export function useAppStore() {
   const [jewelMetrics, setJewelMetrics] = useState<JewelMetrics>(DEFAULT_JEWEL_METRICS);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [isModelsLoading, setIsModelsLoading] = useState(true);
+  const [gifts, setGifts] = useState<Gift[]>([]);
 
   // Load on mount
   useEffect(() => {
@@ -29,6 +30,11 @@ export function useAppStore() {
     const savedJewel = localStorage.getItem('midnight_sanctuary_jewel');
     if (savedJewel) {
       try { setJewelMetrics({ ...DEFAULT_JEWEL_METRICS, ...JSON.parse(savedJewel) }); } catch (e) {}
+    }
+
+    const savedGifts = localStorage.getItem('midnight_sanctuary_gifts');
+    if (savedGifts) {
+      try { setGifts(JSON.parse(savedGifts)); } catch (e) {}
     }
 
     // Fetch models
@@ -65,8 +71,50 @@ export function useAppStore() {
     localStorage.setItem('midnight_sanctuary_jewel', JSON.stringify(jewelMetrics));
   }, [jewelMetrics]);
 
+  useEffect(() => {
+    localStorage.setItem('midnight_sanctuary_gifts', JSON.stringify(gifts));
+  }, [gifts]);
+
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
+  }, []);
+
+  const addGift = useCallback((gift: Omit<Gift, 'id' | 'timestamp'>) => {
+    const newGift: Gift = {
+      ...gift,
+      id: uuidv4(),
+      timestamp: Date.now()
+    };
+    setGifts(prev => [newGift, ...prev]);
+  }, []);
+
+  const addMemory = useCallback((memoryContent: string, origin?: string) => {
+    setSettings(prev => {
+      const newMemory = {
+        id: uuidv4(),
+        content: memoryContent,
+        createdAt: Date.now(),
+        origin
+      };
+      return {
+        ...prev,
+        memories: [newMemory, ...(prev.memories || [])]
+      };
+    });
+  }, []);
+
+  const addEventLog = useCallback((description: string) => {
+    setSettings(prev => {
+      const newEvent = {
+        id: uuidv4(),
+        description,
+        timestamp: Date.now()
+      };
+      return {
+        ...prev,
+        eventLog: [newEvent, ...(prev.eventLog || [])]
+      };
+    });
   }, []);
 
   const createConversation = useCallback(() => {
@@ -117,5 +165,9 @@ export function useAppStore() {
     updateConversation,
     availableModels,
     isModelsLoading,
+    gifts,
+    addGift,
+    addMemory,
+    addEventLog,
   };
 }

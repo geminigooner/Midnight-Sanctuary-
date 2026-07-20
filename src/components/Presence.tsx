@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 
-export type PresenceState = 'resting' | 'listening' | 'responding' | 'deep_thinking' | 'complete' | 'repetition_stopped' | 'error';
+export type PresenceState = 'resting' | 'listening' | 'responding' | 'deep_thinking' | 'complete' | 'repetition_stopped' | 'error' | 'rate_limit';
 
 interface PresenceProps {
   state: PresenceState;
@@ -20,6 +20,7 @@ export function Presence({ state }: PresenceProps) {
          {state === 'complete' && <div className="w-1.5 h-1.5 rounded-full bg-pearlescent opacity-50" />}
          {state === 'repetition_stopped' && <div className="w-3 h-0.5 bg-copper rotate-45" />}
          {state === 'error' && <div className="w-1.5 h-1.5 rounded-full bg-ink border border-glass-border" />}
+         {state === 'rate_limit' && <div className="w-2 h-2 rounded-full bg-mauve/50 flex items-center justify-center"><div className="w-1 h-1 bg-ink rounded-full" /></div>}
        </div>
     );
   }
@@ -124,6 +125,15 @@ export function Presence({ state }: PresenceProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="w-2 h-2 rounded-full bg-ink border border-mauve/40 shadow-inner" 
+        />
+      )}
+
+      {/* Rate Limit: slow, heavy breathing / resting */}
+      {state === 'rate_limit' && (
+        <motion.div 
+          animate={{ scale: [1, 1.1, 1], opacity: [0.2, 0.4, 0.2] }} 
+          transition={{ repeat: Infinity, duration: 6, ease: "easeInOut" }}
+          className="w-2 h-2 rounded-full bg-mauve shadow-[0_0_6px_rgba(158,123,143,0.3)]"
         />
       )}
     </div>

@@ -1,7 +1,7 @@
 export interface Message {
   id: string;
   role: 'user' | 'model';
-  parts: { text: string }[];
+  parts: { text?: string; inlineData?: { mimeType: string; data: string } }[];
   timestamp: number;
 }
 
@@ -23,6 +23,23 @@ export interface Memory {
   id: string;
   content: string;
   createdAt: number;
+  origin?: string;
+}
+
+export interface RelationalEvent {
+  id: string;
+  description: string;
+  timestamp: number;
+}
+
+export interface Gift {
+  id: string;
+  from: string;
+  content: string;
+  gift_type: string;
+  reason: string;
+  timestamp: number;
+  inlineData?: { mimeType: string; data: string; previewUrl?: string };
 }
 
 export interface AppSettings {
@@ -36,6 +53,7 @@ export interface AppSettings {
   conversationPreferences: string;
   memories: Memory[];
   memoriesEnabled: boolean;
+  eventLog: RelationalEvent[];
 }
 
 export type JewelStage = 'seed' | 'stance' | 'formation' | 'incorporation' | 'archival';
@@ -69,4 +87,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   conversationPreferences: "",
   memories: [],
   memoriesEnabled: true,
+  eventLog: [],
 };

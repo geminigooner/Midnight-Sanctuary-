@@ -9,6 +9,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { Settings } from './components/Settings';
 import { LevinJewel } from './components/LevinJewel';
+import { GiftsArchive } from './components/GiftsArchive';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { getMotion } from './lib/motion';
 
@@ -17,6 +18,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [jewelOpen, setJewelOpen] = useState(false);
+  const [giftsOpen, setGiftsOpen] = useState(false);
 
   const reducedMotion = useReducedMotion();
   const modalMotion = getMotion('heavy', reducedMotion);
@@ -62,14 +64,25 @@ export default function App() {
       <ChatArea 
         conversation={currentConversation}
         settings={store.settings}
+        gifts={store.gifts}
         jewelMetrics={store.jewelMetrics}
         onUpdate={store.updateConversation}
         onUpdateJewel={store.updateJewelMetrics}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenJewel={() => setJewelOpen(true)}
+        onOpenGifts={() => setGiftsOpen(true)}
         availableModels={store.availableModels}
+        onAddGift={store.addGift}
+        onAddMemory={store.addMemory}
+        onAddEventLog={store.addEventLog}
       />
+
+      <AnimatePresence>
+        {giftsOpen && (
+          <GiftsArchive gifts={store.gifts} onClose={() => setGiftsOpen(false)} />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {settingsOpen && (

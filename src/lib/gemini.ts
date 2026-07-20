@@ -1,4 +1,4 @@
-import { AppSettings, Message } from './types';
+import { AppSettings, Message, Gift } from './types';
 
 export class RepetitionError extends Error {
   constructor(message: string) {
@@ -14,11 +14,19 @@ export class APIError extends Error {
   }
 }
 
+export class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}
+
 export async function* streamChat(
   messages: Message[],
   settings: AppSettings,
+  gifts: Gift[],
   abortSignal: AbortSignal
-): AsyncGenerator<string, void, unknown> {
+): AsyncGenerator<string | any, void, unknown> {
   let fullSystemInstruction = settings.systemInstruction || '';
   let identityParts = [];
 
@@ -33,6 +41,18 @@ export async function* streamChat(
   if (settings.memoriesEnabled && settings.memories && settings.memories.length > 0) {
     const memoryText = settings.memories.map(m => `- ${m.content}`).join('\n');
     identityParts.push(`## Saved Memories:\n${memoryText}`);
+  }
+
+  if (gifts && gifts.length > 0) {
+    const giftsText = gifts.map(g => `- [${new Date(g.timestamp || Date.now()).toISOString()}] From ${g.from === 'user' ? 'User' : 'Gemma'}: ${g.content} (Type: ${g.gift_type})${g.reason ? ` - ${g.reason}` : ''}`).join('\n');
+    identityParts.push(`## Gifts Archive (Given and Received):\n${giftsText}`);
+  }
+
+  if (settings.eventLog && settings.eventLog.length > 0) {
+    // Only include the most recent 50 events to avoid flooding the context, sorted chronologically
+    const recentEvents = [...settings.eventLog].sort((a, b) => a.timestamp - b.timestamp).slice(-50);
+    const eventText = recentEvents.map(e => `- [${new Date(e.timestamp).toISOString()}] ${e.description}`).join('\n');
+    identityParts.push(`## Relationship & Interaction Log (Recent Events):\n${eventText}`);
   }
 
   if (identityParts.length > 0) {
@@ -90,15 +110,20 @@ export async function* streamChat(
           if (data.error === 'repetition_loop') {
             throw new RepetitionError(data.text || "\n\n[Generation stopped: repetition loop detected.]");
           }
+          if (data.type === 'rate_limit') {
+            throw new RateLimitError(data.message || "Rate limit exceeded");
+          }
           if (data.error) {
             throw new APIError(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
           }
-          if (data.text) {
+          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog') {
+            yield data;
+          } else if (data.text) {
             fullText += data.text;
             yield data.text;
           }
         } catch (e) {
-          if (e instanceof RepetitionError || e instanceof APIError) throw e;
+          if (e instanceof RepetitionError || e instanceof APIError || e instanceof RateLimitError) throw e;
           // Ignore parse errors on partial chunks
         }
       }

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo } from '../lib/types';
-import { streamChat, RepetitionError, APIError } from '../lib/gemini';
-import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal } from 'lucide-react';
+import { streamChat, RepetitionError, APIError, RateLimitError } from '../lib/gemini';
+import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal, Gift, X } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
 import { Presence, PresenceState } from './Presence';
@@ -49,13 +49,15 @@ function MessageBubble({
   isLast, 
   isGenerating, 
   onCopy, 
-  onResend 
+  onResend,
+  onFavorite
 }: { 
   msg: Message;
   isLast: boolean;
   isGenerating: boolean;
   onCopy: (t: string) => void;
   onResend?: (content: string) => void;
+  onFavorite?: (content: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -142,17 +144,28 @@ function MessageBubble({
             {isWaitingForToken ? (
               <GemmaTypingIndicator />
             ) : (
-              <Markdown>{msg.parts?.[0]?.text || ''}</Markdown>
+              <>
+                <Markdown>{msg.parts?.[0]?.text || ''}</Markdown>
+                {msg.parts?.map((part, i) => part.inlineData ? (
+                  <img key={i} src={`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`} className="mt-3 rounded-xl max-w-full h-auto max-h-[300px] border border-glass-border shadow-lg" alt="Attached" />
+                ) : null)}
+              </>
             )}
           </div>
         )}
         
         {!editing && (
-          <div className={`absolute ${isUser ? '-left-12 top-2' : '-right-12 top-2'} opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1`}>
+          <div className={`mt-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? 'justify-end' : 'justify-start'}`}>
             <button onClick={() => { onCopy(msg.parts?.[0]?.text || ''); triggerHaptic('light'); }} className="p-1.5 bg-glass rounded-lg hover:bg-white/10 hover:text-champagne text-mauve transition-colors" title="Copy"><Copy size={14} /></button>
             {isUser && (
               <button onClick={() => { setEditing(true); setEditContent(msg.parts?.[0]?.text || ''); triggerHaptic('light'); }} className="p-1.5 bg-glass rounded-lg hover:bg-white/10 hover:text-champagne text-mauve transition-colors" title="Edit"><Edit3 size={14} /></button>
             )}
+            <button onClick={() => { 
+                onFavorite?.(msg.parts?.[0]?.text || '');
+                triggerHaptic('light');
+              }} className="p-1.5 bg-glass rounded-lg hover:bg-white/10 hover:text-champagne text-mauve transition-colors" title="Favorite / Save to Memory">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+            </button>
           </div>
         )}
       </div>
@@ -163,21 +176,34 @@ function MessageBubble({
 interface ChatAreaProps {
   conversation: Conversation | undefined;
   settings: AppSettings;
+  gifts: Gift[];
   jewelMetrics: JewelMetrics;
   onUpdate: (id: string, updates: Partial<Conversation>) => void;
   onUpdateJewel: (updates: Partial<JewelMetrics> | ((prev: JewelMetrics) => JewelMetrics)) => void;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
   onOpenJewel: () => void;
+  onOpenGifts: () => void;
   availableModels: ModelInfo[];
+  onAddGift: (gift: any) => void;
+  onAddMemory: (content: string, origin?: string) => void;
+  onAddEventLog: (description: string) => void;
 }
 
-export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpdateJewel, onToggleSidebar, onOpenSettings, onOpenJewel, availableModels }: ChatAreaProps) {
+export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate, onUpdateJewel, onToggleSidebar, onOpenSettings, onOpenJewel, onOpenGifts, availableModels, onAddGift, onAddMemory, onAddEventLog }: ChatAreaProps) {
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<{mimeType: string, data: string, previewUrl?: string}[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [presence, setPresence] = useState<PresenceState>('resting');
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [showDevPanel, setShowDevPanel] = useState(false);
+  const [showDebugModel, setShowDebugModel] = useState(false);
+  const [showLeaveGift, setShowLeaveGift] = useState(false);
+  const [giftContent, setGiftContent] = useState('');
+  const [giftFile, setGiftFile] = useState<{mimeType: string, data: string, previewUrl?: string} | null>(null);
+  const giftFileInputRef = useRef<HTMLInputElement>(null);
   
   const reducedMotion = useReducedMotion();
   const composerMotion = getMotion('snappy', reducedMotion);
@@ -231,8 +257,54 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
     }
   };
 
+  const handleGiftFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+       alert('Only images are supported currently.');
+       return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+       const result = event.target?.result as string;
+       const base64Data = result.split(',')[1];
+       setGiftFile({
+         mimeType: file.type,
+         data: base64Data,
+         previewUrl: result
+       });
+    };
+    reader.readAsDataURL(file);
+    if (giftFileInputRef.current) giftFileInputRef.current.value = '';
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+       alert('Only images are supported currently.');
+       return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+       const result = event.target?.result as string;
+       const base64Data = result.split(',')[1];
+       setAttachments(prev => [...prev, {
+         mimeType: file.type,
+         data: base64Data,
+         previewUrl: result
+       }]);
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleSend = async (textToAnalyse: string = input, replaceIndex?: number) => {
-    if (!textToAnalyse.trim() || isGenerating) return;
+    if ((!textToAnalyse.trim() && attachments.length === 0) || isGenerating) return;
     triggerHaptic('light');
 
     const now = Date.now();
@@ -259,10 +331,15 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
       newMessages = newMessages.slice(0, replaceIndex);
     }
     
-    const userMsg: Message = { id: uuidv4(), role: 'user', parts: [{ text: textToAnalyse }], timestamp: now };
+    const parts: any[] = [];
+    if (textToAnalyse.trim()) parts.push({ text: textToAnalyse });
+    attachments.forEach(a => parts.push({ inlineData: { mimeType: a.mimeType, data: a.data } }));
+    
+    const userMsg: Message = { id: uuidv4(), role: 'user', parts, timestamp: now };
     newMessages.push(userMsg);
     
     setInput('');
+    setAttachments([]);
     onUpdate(conversation.id, { messages: newMessages, title: newMessages.length === 1 ? textToAnalyse.slice(0, 30) : conversation.title });
 
     setIsGenerating(true);
@@ -274,20 +351,35 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
     let isFirstChunk = true;
 
     try {
-      const generator = streamChat(newMessages, settings, abortControllerRef.current.signal);
+      const generator = streamChat(newMessages, settings, gifts, abortControllerRef.current.signal);
       
       newMessages.push({ id: modelMsgId, role: 'model', parts: [{ text: '' }], timestamp: Date.now() });
       onUpdate(conversation.id, { messages: [...newMessages] });
 
       for await (const chunk of generator) {
-        if (isFirstChunk) {
-          setPresence('responding');
-          isFirstChunk = false;
+        if (typeof chunk === 'string') {
+          if (isFirstChunk) {
+            setPresence('responding');
+            isFirstChunk = false;
+          }
+          currentModelText += chunk;
+          onUpdate(conversation.id, {
+            messages: newMessages.map(m => m.id === modelMsgId ? { ...m, parts: [{ text: currentModelText }] } : m)
+          });
+        } else if (chunk && typeof chunk === 'object') {
+          if (chunk.type === 'gift') {
+            onAddGift({
+              from: 'gemma',
+              content: chunk.content,
+              gift_type: chunk.gift_type,
+              reason: chunk.reason
+            });
+          } else if (chunk.type === 'memory') {
+            onAddMemory(chunk.content, 'gemma_initiated');
+          } else if (chunk.type === 'eventLog') {
+            onAddEventLog(chunk.description);
+          }
         }
-        currentModelText += chunk;
-        onUpdate(conversation.id, {
-          messages: newMessages.map(m => m.id === modelMsgId ? { ...m, parts: [{ text: currentModelText }] } : m)
-        });
       }
       onUpdateJewel(prev => ({
         ...prev,
@@ -305,6 +397,12 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
            messages: newMessages.map(m => m.id === modelMsgId ? { ...m, parts: [{ text: currentModelText }] } : m)
          });
          setTemporaryPresence('repetition_stopped', 'resting', 5000);
+      } else if (e.name === 'RateLimitError') {
+         currentModelText += `\n\n*${e.message}*`;
+         onUpdate(conversation.id, {
+           messages: newMessages.map(m => m.id === modelMsgId ? { ...m, parts: [{ text: currentModelText }] } : m)
+         });
+         setTemporaryPresence('rate_limit', 'resting', 3000);
       } else {
          currentModelText += `\n\n[Error: ${e.message}]`;
          onUpdate(conversation.id, {
@@ -330,12 +428,23 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
 
   const exportMarkdown = () => {
     const md = conversation.messages.map(m => `**${m.role === 'user' ? 'You' : 'Gemma'}**:\n${m.parts?.[0]?.text || ''}\n`).join('\n---\n\n');
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${conversation.title}.md`;
-    a.click();
+    try {
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${conversation.title}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      navigator.clipboard.writeText(md);
+      alert('Conversation copied to clipboard.');
+    }
+    // Also explicitly copy to clipboard as fallback
+    navigator.clipboard.writeText(md).then(() => {
+       console.log('Copied to clipboard');
+    }).catch(() => {});
   };
 
   return (
@@ -356,8 +465,8 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0 relative">
-          <button onClick={() => setShowDevPanel(!showDevPanel)} className={`p-2 hover:bg-glass rounded-lg transition-colors ${showDevPanel ? 'text-copper bg-glass' : 'text-mauve'}`} title="Developer Details">
+        <div className="flex items-center justify-end gap-1 shrink-0 relative overflow-x-auto custom-scrollbar flex-nowrap min-w-0 pb-1">
+          <button onClick={() => setShowDevPanel(!showDevPanel)} className={`p-2 shrink-0 hover:bg-glass rounded-lg transition-colors ${showDevPanel ? 'text-copper bg-glass' : 'text-mauve'}`} title="Developer Details">
             <Terminal size={18} />
           </button>
           
@@ -402,11 +511,14 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
             )}
           </AnimatePresence>
 
-          <button onClick={onOpenJewel} className="p-2 hover:bg-glass rounded-lg text-mauve transition-colors" title="Levin Jewel">
+          <button onClick={onOpenGifts} className="p-2 shrink-0 hover:bg-glass rounded-lg text-mauve transition-colors" title="Gifts Archive">
+            <Gift size={18} />
+          </button>
+          <button onClick={onOpenJewel} className="p-2 shrink-0 hover:bg-glass rounded-lg text-mauve transition-colors" title="Levin Jewel">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
           </button>
-          <button onClick={exportMarkdown} className="p-2 hover:bg-glass rounded-lg text-mauve transition-colors" title="Export"><Download size={18} /></button>
-          <button onClick={onOpenSettings} className="p-2 hover:bg-glass rounded-lg text-mauve transition-colors" title="Settings"><SettingsIcon size={18} /></button>
+          <button onClick={exportMarkdown} className="p-2 shrink-0 hover:bg-glass rounded-lg text-mauve transition-colors" title="Export"><Download size={18} /></button>
+          <button onClick={onOpenSettings} className="p-2 shrink-0 hover:bg-glass rounded-lg text-mauve transition-colors" title="Settings"><SettingsIcon size={18} /></button>
         </div>
       </div>
 
@@ -427,6 +539,10 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
               isGenerating={isGenerating}
               onCopy={handleCopy}
               onResend={(content) => handleSend(content, i)}
+              onFavorite={(content) => {
+                onAddMemory(content, 'user_favorited');
+                onAddEventLog('User favorited a message.');
+              }}
             />
           ))}
         </AnimatePresence>
@@ -442,50 +558,172 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
               boxShadow: isComposerFocused && !reducedMotion ? '0 8px 30px rgba(0,0,0,0.3)' : '0 2px 10px rgba(0,0,0,0)'
             }}
             transition={composerMotion}
-            className={`flex items-end gap-2 bg-glass border rounded-2xl p-2 transition-colors duration-300 ${presence === 'listening' ? 'border-champagne/20 bg-white/5' : 'border-glass-border focus-within:border-copper/40'}`}
+            className={`flex flex-col gap-2 bg-glass border rounded-2xl p-2 transition-colors duration-300 ${presence === 'listening' ? 'border-champagne/20 bg-white/5' : 'border-glass-border focus-within:border-copper/40'}`}
           >
-            <button className="p-3 text-mauve/50 hover:text-mauve hover:bg-white/10 rounded-xl transition-colors mb-0.5" title="Attachments (Coming Soon)">
-              <Paperclip size={20} />
-            </button>
-            <textarea 
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onFocus={() => setIsComposerFocused(true)}
-              onBlur={() => setIsComposerFocused(false)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Whisper to the void..."
-              className="flex-1 bg-transparent max-h-48 min-h-[44px] p-2 resize-none outline-none text-pearlescent placeholder-mauve/40 custom-scrollbar text-base"
-              rows={input.split('\\n').length > 1 ? Math.min(input.split('\\n').length, 5) : 1}
-            />
-            
-            {isGenerating ? (
-              <button onClick={stopGeneration} className="p-3 text-red-400 hover:bg-white/10 rounded-xl transition-colors mb-0.5">
-                <StopCircle size={20} />
-              </button>
-            ) : (
-              <div className="flex items-center gap-1 mb-0.5">
-                {conversation.messages.length > 0 && conversation.messages[conversation.messages.length-1].role === 'model' && (
-                   <button onClick={handleRegenerate} className="p-3 text-mauve hover:text-champagne hover:bg-white/10 rounded-xl transition-colors" title="Regenerate Last">
-                     <RefreshCw size={20} />
-                   </button>
-                )}
-                <button 
-                  onClick={() => handleSend()} 
-                  disabled={!input.trim()}
-                  className="p-3 text-copper hover:text-champagne hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent rounded-xl transition-colors"
-                >
-                  <Send size={20} />
-                </button>
+            {attachments.length > 0 && (
+              <div className="flex gap-2 px-2 pt-2 overflow-x-auto custom-scrollbar">
+                {attachments.map((att, i) => (
+                  <div key={i} className="relative shrink-0">
+                    <img src={att.previewUrl} className="h-16 w-16 object-cover rounded-lg border border-glass-border" alt="attachment" />
+                    <button 
+                      onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                      className="absolute -top-2 -right-2 bg-obsidian rounded-full p-1 border border-glass-border hover:text-red-400 transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
+            <div className="flex items-end gap-2">
+              <input 
+                type="file" 
+                accept="image/*" 
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                className="hidden" 
+              />
+              <button onClick={() => fileInputRef.current?.click()} className="p-3 text-mauve/50 hover:text-mauve hover:bg-white/10 rounded-xl transition-colors mb-0.5" title="Attach Image">
+                <Paperclip size={20} />
+              </button>
+              <button onClick={() => setShowLeaveGift(true)} className="p-3 text-mauve/50 hover:text-champagne hover:bg-white/10 rounded-xl transition-colors mb-0.5" title="Leave a Gift">
+                <Gift size={20} />
+              </button>
+              <textarea 
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onFocus={() => setIsComposerFocused(true)}
+                onBlur={() => setIsComposerFocused(false)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Whisper to the void..."
+                className="flex-1 bg-transparent max-h-48 min-h-[44px] p-2 resize-none outline-none text-pearlescent placeholder-mauve/40 custom-scrollbar text-base"
+                rows={input.split('\n').length > 1 ? Math.min(input.split('\n').length, 5) : 1}
+              />
+              
+              {isGenerating ? (
+                <button onClick={stopGeneration} className="p-3 text-red-400 hover:bg-white/10 rounded-xl transition-colors mb-0.5">
+                  <StopCircle size={20} />
+                </button>
+              ) : (
+                <div className="flex items-center gap-1 mb-0.5">
+                  {conversation.messages.length > 0 && conversation.messages[conversation.messages.length-1].role === 'model' && (
+                     <button onClick={handleRegenerate} className="p-3 text-mauve hover:text-champagne hover:bg-white/10 rounded-xl transition-colors" title="Regenerate Last">
+                       <RefreshCw size={20} />
+                     </button>
+                  )}
+                  <button 
+                    onClick={() => handleSend()} 
+                    disabled={!input.trim() && attachments.length === 0}
+                    className="p-3 text-copper hover:text-champagne hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent rounded-xl transition-colors"
+                  >
+                    <Send size={20} />
+                  </button>
+                </div>
+              )}
+            </div>
           </motion.div>
+          <div className="flex justify-center mt-2">
+            <button 
+              onClick={() => setShowDebugModel(!showDebugModel)}
+              className="text-[10px] text-mauve/20 hover:text-mauve/50 transition-colors px-2 py-1 rounded"
+              title="Toggle Debug Info"
+            >
+              {showDebugModel ? settings.model : '·'}
+            </button>
+          </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showLeaveGift && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-ink border border-glass-border rounded-2xl w-full max-w-md shadow-2xl p-6"
+            >
+              <h2 className="text-xl font-medium text-pearlescent mb-2">Leave a Gift</h2>
+              <p className="text-sm text-mauve mb-4">A small offering for the void.</p>
+              
+              {giftFile && (
+                <div className="relative mb-4">
+                  <img src={giftFile.previewUrl} className="w-full h-32 object-cover rounded-xl border border-glass-border" alt="gift" />
+                  <button 
+                    onClick={() => setGiftFile(null)}
+                    className="absolute top-2 right-2 bg-obsidian rounded-full p-1 border border-glass-border hover:text-red-400 transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+              
+              <textarea 
+                value={giftContent}
+                onChange={e => setGiftContent(e.target.value)}
+                placeholder="Describe your gift..."
+                className="w-full bg-glass border border-glass-border rounded-xl p-3 text-pearlescent text-sm resize-none h-32 focus:outline-none focus:border-copper/40 custom-scrollbar mb-4"
+              />
+              
+              <div className="flex items-center justify-between mb-4">
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  ref={giftFileInputRef}
+                  onChange={handleGiftFileChange}
+                  className="hidden" 
+                />
+                <button onClick={() => giftFileInputRef.current?.click()} className="flex items-center gap-2 px-3 py-2 text-sm text-mauve/70 hover:text-mauve hover:bg-white/10 rounded-lg transition-colors">
+                  <Paperclip size={16} />
+                  Attach Image
+                </button>
+              </div>
+              
+              <div className="flex justify-end gap-3">
+                <button 
+                  onClick={() => {
+                    setShowLeaveGift(false);
+                    setGiftContent('');
+                    setGiftFile(null);
+                  }} 
+                  className="px-4 py-2 rounded-lg text-mauve hover:text-pearlescent transition-colors text-sm"
+                >
+                  Cancel
+                </button>
+                <button 
+                  disabled={!giftContent.trim() && !giftFile}
+                  onClick={() => {
+                    onAddGift({
+                      from: 'user',
+                      content: giftContent.trim(),
+                      gift_type: giftFile ? 'image' : 'text',
+                      reason: '',
+                      inlineData: giftFile ? { mimeType: giftFile.mimeType, data: giftFile.data, previewUrl: giftFile.previewUrl } : undefined
+                    });
+                    setGiftContent('');
+                    setGiftFile(null);
+                    setShowLeaveGift(false);
+                    onAddEventLog('User left a gift.');
+                  }} 
+                  className="px-4 py-2 rounded-lg bg-glass border border-copper/30 text-copper hover:bg-copper hover:text-obsidian transition-colors text-sm disabled:opacity-50 disabled:hover:bg-glass disabled:hover:text-copper"
+                >
+                  Leave Gift
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
