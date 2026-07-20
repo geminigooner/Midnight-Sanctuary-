@@ -50,7 +50,8 @@ function MessageBubble({
   isGenerating, 
   onCopy, 
   onResend,
-  onFavorite
+  onFavorite,
+  onImageClick
 }: { 
   msg: Message;
   isLast: boolean;
@@ -58,6 +59,7 @@ function MessageBubble({
   onCopy: (t: string) => void;
   onResend?: (content: string) => void;
   onFavorite?: (content: string) => void;
+  onImageClick?: (url: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -147,7 +149,13 @@ function MessageBubble({
               <>
                 <Markdown>{msg.parts?.[0]?.text || ''}</Markdown>
                 {msg.parts?.map((part, i) => part.inlineData ? (
-                  <img key={i} src={`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`} className="mt-3 rounded-xl max-w-full h-auto max-h-[300px] border border-glass-border shadow-lg" alt="Attached" />
+                  <img 
+                    key={i} 
+                    src={`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`} 
+                    className="mt-3 rounded-xl max-w-full h-auto max-h-[300px] border border-glass-border shadow-lg cursor-pointer hover:opacity-90 transition-opacity" 
+                    alt="Attached" 
+                    onClick={() => onImageClick?.(`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`)}
+                  />
                 ) : null)}
               </>
             )}
@@ -203,6 +211,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   const [showLeaveGift, setShowLeaveGift] = useState(false);
   const [giftContent, setGiftContent] = useState('');
   const [giftFile, setGiftFile] = useState<{mimeType: string, data: string, previewUrl?: string} | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const giftFileInputRef = useRef<HTMLInputElement>(null);
   
   const reducedMotion = useReducedMotion();
@@ -543,6 +552,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
                 onAddMemory(content, 'user_favorited');
                 onAddEventLog('User favorited a message.');
               }}
+              onImageClick={(url) => setSelectedImage(url)}
             />
           ))}
         </AnimatePresence>
@@ -638,6 +648,31 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {selectedImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSelectedImage(null)}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl cursor-pointer"
+          >
+            <button className="absolute top-6 right-6 p-2 text-mauve hover:text-white transition-colors bg-white/10 rounded-full">
+              <X size={24} />
+            </button>
+            <motion.img 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              src={selectedImage}
+              alt="Full screen attachment"
+              className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showLeaveGift && (

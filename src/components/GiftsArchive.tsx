@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Gift as GiftType } from '../lib/types';
 import { X, Gift } from 'lucide-react';
-import { motion, useReducedMotion } from 'motion/react';
+import { motion, useReducedMotion, AnimatePresence } from 'motion/react';
 import { getMotion } from '../lib/motion';
 
 interface GiftsArchiveProps {
@@ -10,13 +10,15 @@ interface GiftsArchiveProps {
 }
 
 export function GiftsArchive({ gifts, onClose }: GiftsArchiveProps) {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const reducedMotion = useReducedMotion();
   const modalMotion = getMotion('heavy', reducedMotion);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+    <>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 backdrop-blur-sm"
     >
@@ -53,7 +55,10 @@ export function GiftsArchive({ gifts, onClose }: GiftsArchiveProps) {
               {gifts.map(gift => (
                 <div key={gift.id} className="bg-glass border border-glass-border rounded-xl p-5 hover:border-copper/40 transition-colors flex flex-col gap-3 group">
                   {gift.inlineData && (
-                    <div className="w-full h-32 overflow-hidden rounded-lg mb-2">
+                    <div 
+                      className="w-full h-32 overflow-hidden rounded-lg mb-2 cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setSelectedImage(gift.inlineData!.previewUrl || `data:${gift.inlineData!.mimeType};base64,${gift.inlineData!.data}`)}
+                    >
                       <img src={gift.inlineData.previewUrl || `data:${gift.inlineData.mimeType};base64,${gift.inlineData.data}`} className="w-full h-full object-cover" alt="gift" />
                     </div>
                   )}
@@ -78,5 +83,31 @@ export function GiftsArchive({ gifts, onClose }: GiftsArchiveProps) {
         </div>
       </motion.div>
     </motion.div>
+
+      <AnimatePresence>
+        {selectedImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSelectedImage(null)}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl cursor-pointer"
+          >
+            <button className="absolute top-6 right-6 p-2 text-mauve hover:text-white transition-colors bg-white/10 rounded-full">
+              <X size={24} />
+            </button>
+            <motion.img 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              src={selectedImage}
+              alt="Full screen gift"
+              className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
