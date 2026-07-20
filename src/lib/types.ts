@@ -1,7 +1,7 @@
 export interface Message {
   id: string;
   role: 'user' | 'model';
-  parts: { text?: string; inlineData?: { mimeType: string; data: string } }[];
+  parts: { text?: string; thought?: boolean; inlineData?: { mimeType: string; data: string } }[];
   timestamp: number;
 }
 
@@ -81,7 +81,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   temperature: 2.0,
   topP: 0.95,
   maxOutputTokens: 4096,
-  model: "models/gemma-4-31b-it",
+  model: "models/gemini-2.5-flash",
   favoriteModels: [],
   aboutMe: "",
   conversationPreferences: "",

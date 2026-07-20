@@ -16,7 +16,18 @@ export function useAppStore() {
     let loadedSettings = { ...DEFAULT_SETTINGS };
     const savedConvos = localStorage.getItem('midnight_sanctuary_conversations');
     if (savedConvos) {
-      try { setConversations(JSON.parse(savedConvos)); } catch (e) {}
+      try {
+        const parsed = JSON.parse(savedConvos);
+        // Defensive migration: filter out completely empty model messages
+        const filtered = parsed.map((c: any) => ({
+          ...c,
+          messages: c.messages?.filter((m: any) => 
+            m.role === 'user' || 
+            (m.role === 'model' && m.parts?.some((p: any) => p.text || p.thought || p.functionCall))
+          ) || []
+        }));
+        setConversations(filtered);
+      } catch (e) {}
     }
     const savedSettings = localStorage.getItem('midnight_sanctuary_settings');
     if (savedSettings) {

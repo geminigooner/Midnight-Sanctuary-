@@ -116,7 +116,7 @@ export async function* streamChat(
           if (data.error) {
             throw new APIError(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
           }
-          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog') {
+          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog' || data.type === 'thought') {
             yield data;
           } else if (data.text) {
             fullText += data.text;

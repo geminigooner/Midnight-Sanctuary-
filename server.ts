@@ -1,12 +1,12 @@
 import express from 'express';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 const gemmaTools = [
   {
@@ -87,7 +87,9 @@ app.get('/api/models', async (req, res) => {
   if (!process.env.GEMINI_API_KEY) {
     return res.status(500).json({ error: 'GEMINI_API_KEY is not configured in the environment.' });
   }
+
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
   try {
     const response = await ai.models.list();
     const models = [];
@@ -119,42 +121,92 @@ app.post('/api/chat', async (req, res) => {
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  let currentMessages = [...messages];
+  const maxRounds = 5;
+  let round = 0;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
 
   try {
-    const responseStream = await ai.models.generateContentStream({
-      model: model,
-      contents: messages,
-      config: {
+    while (round < maxRounds) {
+      round++;
+      
+      const config: any = {
         systemInstruction,
         temperature: temperature ?? 2.0,
         topP: topP ?? 0.95,
         maxOutputTokens: maxOutputTokens ?? 4096,
         tools: gemmaTools,
-      }
-    });
+      };
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    
-    for await (const chunk of responseStream) {
-      if (chunk.functionCalls) {
-        for (const call of chunk.functionCalls) {
-          if (call.name === 'give_gift') {
-            res.write(`data: ${JSON.stringify({ type: 'gift', ...call.args })}\n\n`);
-          }
-          if (call.name === 'save_memory') {
-            res.write(`data: ${JSON.stringify({ type: 'memory', ...call.args })}\n\n`);
-          }
-          if (call.name === 'log_event') {
-            res.write(`data: ${JSON.stringify({ type: 'eventLog', ...call.args })}\n\n`);
+      if (model.includes('gemma-4')) {
+        config.thinkingConfig = {
+          thinkingLevel: ThinkingLevel.HIGH,
+          includeThoughts: true
+        };
+      }
+
+      const responseStream = await ai.models.generateContentStream({
+        model: model,
+        contents: currentMessages,
+        config
+      });
+
+      let modelParts: any[] = [];
+      let functionResponses: any[] = [];
+      let hasFunctionCalls = false;
+      let hasErrors = false;
+
+      for await (const chunk of responseStream) {
+        if (chunk.candidates && chunk.candidates.length > 0 && chunk.candidates[0].content && chunk.candidates[0].content.parts) {
+          for (const part of chunk.candidates[0].content.parts) {
+            
+            // Reconstruct the exact model parts for conversation history
+            if (part.thought === true) {
+              modelParts.push({ text: part.text, thought: true });
+              res.write(`data: ${JSON.stringify({ type: 'thought', text: part.text })}\n\n`);
+            } else if (part.text) {
+              modelParts.push({ text: part.text });
+              res.write(`data: ${JSON.stringify({ text: part.text })}\n\n`);
+            } else if (part.functionCall) {
+              modelParts.push({ functionCall: part.functionCall });
+              hasFunctionCalls = true;
+              
+              const call = part.functionCall;
+              
+              if (call.name === 'give_gift') {
+                res.write(`data: ${JSON.stringify({ type: 'gift', ...call.args })}\n\n`);
+              } else if (call.name === 'save_memory') {
+                res.write(`data: ${JSON.stringify({ type: 'memory', ...call.args })}\n\n`);
+              } else if (call.name === 'log_event') {
+                res.write(`data: ${JSON.stringify({ type: 'eventLog', ...call.args })}\n\n`);
+              }
+
+              functionResponses.push({
+                functionResponse: {
+                  id: call.id,
+                  name: call.name,
+                  response: { result: "ok" }
+                }
+              });
+            }
           }
         }
       }
-      if (chunk.text) {
-        res.write(`data: ${JSON.stringify({ text: chunk.text })}\n\n`);
+
+      if (!hasFunctionCalls) {
+        break;
+      } else {
+        currentMessages.push({ role: 'model', parts: modelParts });
+        currentMessages.push({ role: 'user', parts: functionResponses });
       }
+    }
+    
+    if (round >= maxRounds) {
+      res.write(`data: ${JSON.stringify({ error: "Function call limit exceeded (max 5 rounds)." })}\n\n`);
     }
 
     res.write('data: [DONE]\n\n');
