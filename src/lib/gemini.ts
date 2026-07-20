@@ -19,6 +19,29 @@ export async function* streamChat(
   settings: AppSettings,
   abortSignal: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
+  let fullSystemInstruction = settings.systemInstruction || '';
+  let identityParts = [];
+
+  if (settings.aboutMe?.trim()) {
+    identityParts.push(`## About Me:\n${settings.aboutMe.trim()}`);
+  }
+  
+  if (settings.conversationPreferences?.trim()) {
+    identityParts.push(`## Conversation Preferences:\n${settings.conversationPreferences.trim()}`);
+  }
+
+  if (settings.memoriesEnabled && settings.memories && settings.memories.length > 0) {
+    const memoryText = settings.memories.map(m => `- ${m.content}`).join('\n');
+    identityParts.push(`## Saved Memories:\n${memoryText}`);
+  }
+
+  if (identityParts.length > 0) {
+    const identityContext = identityParts.join('\n\n');
+    fullSystemInstruction = fullSystemInstruction 
+      ? `${identityContext}\n\n---\n\n${fullSystemInstruction}`
+      : identityContext;
+  }
+
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -27,7 +50,7 @@ export async function* streamChat(
         role: m.role,
         parts: m.parts
       })),
-      systemInstruction: settings.systemInstruction,
+      systemInstruction: fullSystemInstruction,
       temperature: settings.temperature,
       topP: settings.topP,
       maxOutputTokens: settings.maxOutputTokens,
@@ -72,12 +95,6 @@ export async function* streamChat(
           }
           if (data.text) {
             fullText += data.text;
-            
-            // Client-side watchdog
-            if (isRepetitive(fullText)) {
-               throw new RepetitionError("\n\n[Generation stopped: repetition loop detected.]");
-            }
-            
             yield data.text;
           }
         } catch (e) {
@@ -87,26 +104,4 @@ export async function* streamChat(
       }
     }
   }
-}
-
-function isRepetitive(text: string): boolean {
-  // Emoji Density Check
-  const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}]/gu;
-  const emojis = text.match(emojiRegex);
-  if (emojis && text.length > 50 && (emojis.length / text.length > 0.15)) {
-    return true;
-  }
-  
-  // N-gram Check
-  const words = text.trim().split(/\s+/);
-  if (words.length >= 15) {
-    const n = 5;
-    const lastN = words.slice(-n).join(' ');
-    const prevN = words.slice(-2*n, -n).join(' ');
-    const prevPrevN = words.slice(-3*n, -2*n).join(' ');
-    if (lastN === prevN && prevN === prevPrevN && lastN.length > 5) {
-      return true;
-    }
-  }
-  return false;
 }

@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Conversation, Message, AppSettings, JewelMetrics } from '../lib/types';
+import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo } from '../lib/types';
 import { streamChat, RepetitionError, APIError } from '../lib/gemini';
-import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip } from 'lucide-react';
+import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
 import { Presence, PresenceState } from './Presence';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { getMotion } from '../lib/motion';
 
 export const triggerHaptic = (type: 'light' | 'medium' | 'heavy' = 'light') => {
   if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -18,6 +19,30 @@ export const triggerHaptic = (type: 'light' | 'medium' | 'heavy' = 'light') => {
     }
   }
 };
+
+function GemmaTypingIndicator() {
+  return (
+    <div className="flex items-center h-[28px] space-x-1.5 opacity-80">
+       {[0, 1, 2].map((i) => (
+         <motion.div
+           key={i}
+           animate={{ 
+             opacity: [0.2, 1, 0.2], 
+             y: [0, -2, 0], 
+             x: [0, 1, 0] 
+           }}
+           transition={{ 
+             repeat: Infinity, 
+             duration: 2.5, 
+             delay: i * 0.4, 
+             ease: "easeInOut" 
+           }}
+           className="w-1 h-1 rounded-full bg-pearlescent shadow-[0_0_4px_rgba(230,232,230,0.8)]"
+         />
+       ))}
+    </div>
+  );
+}
 
 function MessageBubble({ 
   msg, 
@@ -75,17 +100,20 @@ function MessageBubble({
   const userClasses = "bg-obsidian/90 backdrop-blur-2xl border border-copper/30 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05)] text-champagne";
   const gemmaClasses = "bg-plum/30 backdrop-blur-xl border border-glass-border border-t-white/10 shadow-[0_4px_20px_rgba(244,232,211,0.03)] text-pearlescent";
 
-  const isStarting = isGenerating && isLast && !isUser && (msg.parts?.[0]?.text?.length || 0) > 0 && (msg.parts?.[0]?.text?.length || 0) < 15;
+  const isWaitingForToken = isGenerating && isLast && !isUser && (!msg.parts?.[0]?.text || msg.parts[0].text.length === 0);
+
+  const reducedMotion = useReducedMotion();
+  const bubbleMotion = getMotion('standard', reducedMotion);
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
       animate={{ 
         opacity: 1, 
         y: 0, 
-        scale: settled ? [1, 1.01, 1] : 1,
+        scale: settled && !reducedMotion ? [1, 1.01, 1] : 1,
       }}
-      transition={{ duration: 0.4 }}
+      transition={bubbleMotion}
       className={`flex ${isUser ? 'justify-end' : 'justify-start'} group w-full`}
     >
       <div 
@@ -95,17 +123,6 @@ function MessageBubble({
           boxShadow: settled ? (isUser ? 'inset 0 1px 2px rgba(255,255,255,0.05), 0 0 15px rgba(196,118,83,0.1)' : '0 4px 20px rgba(244,232,211,0.03), 0 0 20px rgba(244,232,211,0.1)') : undefined
         }}
       >
-        {isStarting && (
-           <motion.div 
-             initial={{ opacity: 0, scale: 0 }}
-             animate={{ opacity: [0, 1, 0], scale: [0.5, 1.5, 0.5], rotate: [0, 90, 180] }}
-             transition={{ duration: 1, ease: "easeOut" }}
-             className="absolute -top-2 -left-2 w-4 h-4 text-champagne pointer-events-none drop-shadow-[0_0_8px_rgba(244,232,211,0.8)]"
-           >
-             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0l3 9 9 3-9 3-3 9-3-9-9-3 9-3z"/></svg>
-           </motion.div>
-        )}
-
         {editing ? (
           <div className="flex flex-col gap-2">
             <textarea 
@@ -122,7 +139,11 @@ function MessageBubble({
           </div>
         ) : (
           <div className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-glass-border ${msg.parts?.[0]?.text?.includes('[Generation stopped: repetition loop detected.]') ? 'text-copper/90' : ''}`}>
-            <Markdown>{msg.parts?.[0]?.text || ''}</Markdown>
+            {isWaitingForToken ? (
+              <GemmaTypingIndicator />
+            ) : (
+              <Markdown>{msg.parts?.[0]?.text || ''}</Markdown>
+            )}
           </div>
         )}
         
@@ -148,12 +169,18 @@ interface ChatAreaProps {
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
   onOpenJewel: () => void;
+  availableModels: ModelInfo[];
 }
 
-export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpdateJewel, onToggleSidebar, onOpenSettings, onOpenJewel }: ChatAreaProps) {
+export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpdateJewel, onToggleSidebar, onOpenSettings, onOpenJewel, availableModels }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [presence, setPresence] = useState<PresenceState>('resting');
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [showDevPanel, setShowDevPanel] = useState(false);
+  
+  const reducedMotion = useReducedMotion();
+  const composerMotion = getMotion('snappy', reducedMotion);
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -321,11 +348,60 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
           <button onClick={onToggleSidebar} className="p-2 hover:bg-glass rounded-lg text-mauve shrink-0 lg:hidden"><Menu size={20} /></button>
           <Presence state={presence} />
           <div className="flex flex-col overflow-hidden">
-            <span className="font-medium text-champagne truncate">{conversation.title}</span>
-            <span className="text-xs text-mauve/70 tracking-wider truncate">Gemma · {settings.model.split('/').pop()}</span>
+            <span className="font-medium text-champagne truncate">
+              {availableModels?.find(m => m.name === settings.model)?.displayName || settings.model?.split('/').pop() || 'Unknown Model'}
+            </span>
+            <span className="text-xs text-mauve/70 tracking-wider truncate">
+              Temperature {settings.temperature.toFixed(1)}
+            </span>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 relative">
+          <button onClick={() => setShowDevPanel(!showDevPanel)} className={`p-2 hover:bg-glass rounded-lg transition-colors ${showDevPanel ? 'text-copper bg-glass' : 'text-mauve'}`} title="Developer Details">
+            <Terminal size={18} />
+          </button>
+          
+          <AnimatePresence>
+            {showDevPanel && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                className="absolute top-full right-0 mt-2 w-64 bg-ink/95 backdrop-blur-xl border border-glass-border rounded-xl p-4 shadow-2xl z-50 text-sm"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex justify-between items-center border-b border-glass-border pb-2">
+                    <span className="text-mauve font-medium">Developer Details</span>
+                    <Terminal size={14} className="text-copper" />
+                  </div>
+                  
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Provider</span>
+                      <span className="text-pearlescent font-mono">Google</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Model ID</span>
+                      <span className="text-copper font-mono truncate max-w-[120px]" title={settings.model}>{settings.model}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Endpoint</span>
+                      <span className="text-pearlescent font-mono truncate max-w-[120px]">/api/chat</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Temperature</span>
+                      <span className="text-pearlescent font-mono">{settings.temperature.toFixed(1)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Streaming</span>
+                      <span className="text-emerald-400 font-mono">Enabled</span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <button onClick={onOpenJewel} className="p-2 hover:bg-glass rounded-lg text-mauve transition-colors" title="Levin Jewel">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
           </button>
@@ -359,13 +435,23 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
       {/* Composer */}
       <div className={`p-4 bg-obsidian/90 backdrop-blur-xl border-t border-glass-border z-10 transition-colors duration-500 ${presence === 'listening' ? 'shadow-[0_-10px_30px_rgba(244,232,211,0.03)]' : ''}`}>
         <div className="max-w-4xl mx-auto relative">
-          <div className={`flex items-end gap-2 bg-glass border rounded-2xl p-2 transition-colors duration-300 ${presence === 'listening' ? 'border-champagne/20 bg-white/5' : 'border-glass-border focus-within:border-copper/40'}`}>
+          <motion.div 
+            animate={{ 
+              scale: isComposerFocused && !reducedMotion ? 1.01 : 1,
+              y: isComposerFocused && !reducedMotion ? -2 : 0,
+              boxShadow: isComposerFocused && !reducedMotion ? '0 8px 30px rgba(0,0,0,0.3)' : '0 2px 10px rgba(0,0,0,0)'
+            }}
+            transition={composerMotion}
+            className={`flex items-end gap-2 bg-glass border rounded-2xl p-2 transition-colors duration-300 ${presence === 'listening' ? 'border-champagne/20 bg-white/5' : 'border-glass-border focus-within:border-copper/40'}`}
+          >
             <button className="p-3 text-mauve/50 hover:text-mauve hover:bg-white/10 rounded-xl transition-colors mb-0.5" title="Attachments (Coming Soon)">
               <Paperclip size={20} />
             </button>
             <textarea 
               value={input}
               onChange={e => setInput(e.target.value)}
+              onFocus={() => setIsComposerFocused(true)}
+              onBlur={() => setIsComposerFocused(false)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -397,7 +483,7 @@ export function ChatArea({ conversation, settings, jewelMetrics, onUpdate, onUpd
                 </button>
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
       </div>
     </div>

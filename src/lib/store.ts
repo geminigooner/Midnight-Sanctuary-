@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Conversation, AppSettings, DEFAULT_SETTINGS, JewelMetrics, DEFAULT_JEWEL_METRICS } from './types';
+import { Conversation, AppSettings, DEFAULT_SETTINGS, JewelMetrics, DEFAULT_JEWEL_METRICS, ModelInfo } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export function useAppStore() {
@@ -7,9 +7,12 @@ export function useAppStore() {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [jewelMetrics, setJewelMetrics] = useState<JewelMetrics>(DEFAULT_JEWEL_METRICS);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [isModelsLoading, setIsModelsLoading] = useState(true);
 
   // Load on mount
   useEffect(() => {
+    let loadedSettings = { ...DEFAULT_SETTINGS };
     const savedConvos = localStorage.getItem('midnight_sanctuary_conversations');
     if (savedConvos) {
       try { setConversations(JSON.parse(savedConvos)); } catch (e) {}
@@ -18,17 +21,37 @@ export function useAppStore() {
     if (savedSettings) {
       try { 
         const parsed = JSON.parse(savedSettings);
-        // Migrate old model if present in local storage
-        if (parsed.model === 'gemma-2-9b-it' || parsed.model === 'models/gemma-2-9b-it') {
-          parsed.model = 'models/gemma-4-31b-it';
-        }
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed }); 
+        loadedSettings = { ...DEFAULT_SETTINGS, ...parsed };
       } catch (e) {}
     }
+    setSettings(loadedSettings);
+    
     const savedJewel = localStorage.getItem('midnight_sanctuary_jewel');
     if (savedJewel) {
       try { setJewelMetrics({ ...DEFAULT_JEWEL_METRICS, ...JSON.parse(savedJewel) }); } catch (e) {}
     }
+
+    // Fetch models
+    fetch('/api/models')
+      .then(res => res.json())
+      .then((data: ModelInfo[]) => {
+        setAvailableModels(data);
+        setIsModelsLoading(false);
+
+        // If the current model is the default and it's not in the list, try to find the newest Gemma
+        if (!savedSettings) {
+          const gemmaModels = data.filter(m => m.name.toLowerCase().includes('gemma'));
+          if (gemmaModels.length > 0) {
+            // Assuming string sorting might roughly work for versions, or just taking the last one
+            gemmaModels.sort((a, b) => b.name.localeCompare(a.name));
+            setSettings(prev => ({ ...prev, model: gemmaModels[0].name }));
+          }
+        }
+      })
+      .catch(err => {
+        console.error("Failed to fetch models", err);
+        setIsModelsLoading(false);
+      });
   }, []);
 
   // Save on change
@@ -92,5 +115,7 @@ export function useAppStore() {
     deleteConversation,
     renameConversation,
     updateConversation,
+    availableModels,
+    isModelsLoading,
   };
 }
