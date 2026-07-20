@@ -196,6 +196,9 @@ interface ChatAreaProps {
   gifts: Gift[];
   jewelMetrics: JewelMetrics;
   onUpdate: (id: string, updates: Partial<Conversation>) => void;
+  onAddMessage: (conversationId: string, message: Message) => void;
+  onUpdateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
+  onRemoveMessage: (conversationId: string, messageId: string) => void;
   onUpdateJewel: (updates: Partial<JewelMetrics> | ((prev: JewelMetrics) => JewelMetrics)) => void;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
@@ -207,7 +210,7 @@ interface ChatAreaProps {
   onAddEventLog: (description: string) => void;
 }
 
-export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate, onUpdateJewel, onToggleSidebar, onOpenSettings, onOpenJewel, onOpenGifts, availableModels, onAddGift, onAddMemory, onAddEventLog }: ChatAreaProps) {
+export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate, onAddMessage, onUpdateMessage, onRemoveMessage, onUpdateJewel, onToggleSidebar, onOpenSettings, onOpenJewel, onOpenGifts, availableModels, onAddGift, onAddMemory, onAddEventLog }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<{mimeType: string, data: string, previewUrl?: string}[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -322,7 +325,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   };
 
   const handleSend = async (textToAnalyse: string = input, replaceIndex?: number) => {
-    if ((!textToAnalyse.trim() && attachments.length === 0) || isGenerating) return;
+    if ((!textToAnalyse.trim() && attachments.length === 0) || isGenerating || !conversation) return;
     triggerHaptic('light');
 
     const now = Date.now();
@@ -343,10 +346,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       };
     });
 
-    let newMessages = [...conversation.messages];
+    let currentMessages = [...conversation.messages];
     
     if (replaceIndex !== undefined) {
-      newMessages = newMessages.slice(0, replaceIndex);
+      currentMessages = currentMessages.slice(0, replaceIndex);
+      onUpdate(conversation.id, { messages: currentMessages });
     }
     
     const parts: any[] = [];
@@ -354,11 +358,14 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     attachments.forEach(a => parts.push({ inlineData: { mimeType: a.mimeType, data: a.data } }));
     
     const userMsg: Message = { id: uuidv4(), role: 'user', parts, timestamp: now };
-    newMessages.push(userMsg);
+    currentMessages.push(userMsg);
+    onAddMessage(conversation.id, userMsg);
+    if (currentMessages.length === 1) {
+      onUpdate(conversation.id, { title: textToAnalyse.slice(0, 30) });
+    }
     
     setInput('');
     setAttachments([]);
-    onUpdate(conversation.id, { messages: newMessages, title: newMessages.length === 1 ? textToAnalyse.slice(0, 30) : conversation.title });
 
     setIsGenerating(true);
     setPresence('deep_thinking');
@@ -371,9 +378,9 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     try {
       let currentModelThought = '';
       let hasToolCalls = false;
-      const generator = streamChat(newMessages, settings, gifts, abortControllerRef.current.signal);
+      const generator = streamChat(currentMessages, settings, gifts, abortControllerRef.current.signal);
       
-      newMessages.push({ 
+      onAddMessage(conversation.id, { 
         id: modelMsgId, 
         role: 'model', 
         parts: [{ text: '' }],
@@ -381,18 +388,12 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
         thoughtStatus: 'thinking',
         timestamp: Date.now() 
       });
-      onUpdate(conversation.id, { messages: [...newMessages] });
 
       const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
-         let updatedParts = [{ text: text }];
-         
-         onUpdate(conversation.id, {
-           messages: newMessages.map(m => m.id === modelMsgId ? { 
-             ...m, 
-             parts: updatedParts,
-             thoughtText: thought,
-             thoughtStatus: status
-           } : m)
+         onUpdateMessage(conversation.id, modelMsgId, {
+           parts: [{ text: text }],
+           thoughtText: thought,
+           thoughtStatus: status
          });
       };
 
@@ -435,9 +436,9 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       }
       
       if (!currentModelText && !currentModelThought) {
-         onUpdate(conversation.id, {
-           messages: newMessages.filter(m => m.id !== modelMsgId)
-         });
+         onRemoveMessage(conversation.id, modelMsgId);
+         // Add a system event log for the user to see the error
+         onAddEventLog("Gemma returned an empty response.");
       } else {
         updateModelMessage(currentModelText, currentModelThought, 'complete');
         onUpdateJewel(prev => ({
@@ -449,6 +450,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       }
       setTemporaryPresence('complete', 'resting');
     } catch (e: any) {
+      console.error("ChatArea handleSend error:", e);
       if (e.name === 'AbortError') {
          // It was aborted manually, keep what we have
          updateModelMessage(currentModelText, currentModelThought, 'complete');
@@ -462,9 +464,8 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
          setTemporaryPresence('rate_limit', 'resting', 3000);
       } else {
          if (!currentModelText && !currentModelThought) {
-            onUpdate(conversation.id, {
-              messages: newMessages.filter(m => m.id !== modelMsgId)
-            });
+            onRemoveMessage(conversation.id, modelMsgId);
+            onAddEventLog(`Error: ${e.message}`);
             setTemporaryPresence('error', 'resting', 5000);
          } else {
             currentModelText += `\n\n[Error: ${e.message}]`;

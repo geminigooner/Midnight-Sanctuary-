@@ -153,6 +153,32 @@ export function useAppStore() {
     setConversations(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: Date.now() } : c));
   }, []);
 
+  const addMessage = useCallback((conversationId: string, message: Message) => {
+    setConversations(prev => prev.map(c => 
+      c.id === conversationId ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() } : c
+    ));
+  }, []);
+
+  const updateMessage = useCallback((conversationId: string, messageId: string, updates: Partial<Message>) => {
+    setConversations(prev => prev.map(c => 
+      c.id === conversationId ? { 
+        ...c, 
+        messages: c.messages.map(m => m.id === messageId ? { ...m, ...updates } : m),
+        updatedAt: Date.now() 
+      } : c
+    ));
+  }, []);
+
+  const removeMessage = useCallback((conversationId: string, messageId: string) => {
+    setConversations(prev => prev.map(c => 
+      c.id === conversationId ? { 
+        ...c, 
+        messages: c.messages.filter(m => m.id !== messageId),
+        updatedAt: Date.now() 
+      } : c
+    ));
+  }, []);
+
   const updateJewelMetrics = useCallback((updates: Partial<JewelMetrics> | ((prev: JewelMetrics) => JewelMetrics)) => {
     setJewelMetrics(prev => typeof updates === 'function' ? updates(prev) : { ...prev, ...updates });
   }, []);
@@ -174,6 +200,9 @@ export function useAppStore() {
     deleteConversation,
     renameConversation,
     updateConversation,
+    addMessage,
+    updateMessage,
+    removeMessage,
     availableModels,
     isModelsLoading,
     gifts,

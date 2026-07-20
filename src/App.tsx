@@ -67,6 +67,9 @@ export default function App() {
         gifts={store.gifts}
         jewelMetrics={store.jewelMetrics}
         onUpdate={store.updateConversation}
+        onAddMessage={store.addMessage}
+        onUpdateMessage={store.updateMessage}
+        onRemoveMessage={store.removeMessage}
         onUpdateJewel={store.updateJewelMetrics}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onOpenSettings={() => setSettingsOpen(true)}

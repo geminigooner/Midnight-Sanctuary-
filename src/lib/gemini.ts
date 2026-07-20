@@ -73,10 +73,12 @@ export async function* streamChat(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: messages.map(m => ({
-        role: m.role,
-        parts: m.parts
-      })),
+      messages: messages
+        .filter(m => m.parts && m.parts.some(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse))
+        .map(m => ({
+          role: m.role,
+          parts: m.parts.filter(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse)
+        })),
       systemInstruction: fullSystemInstruction,
       temperature: settings.temperature,
       topP: settings.topP,
