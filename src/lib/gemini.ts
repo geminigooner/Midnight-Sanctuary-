@@ -21,12 +21,19 @@ export class RateLimitError extends Error {
   }
 }
 
+export type ChatStreamEvent =
+  | { type: 'thought'; text: string }
+  | { type: 'text'; text: string }
+  | { type: 'gift'; content: string; gift_type: string; reason?: string }
+  | { type: 'memory'; content: string; why_it_matters?: string }
+  | { type: 'eventLog'; description: string };
+
 export async function* streamChat(
   messages: Message[],
   settings: AppSettings,
   gifts: Gift[],
   abortSignal: AbortSignal
-): AsyncGenerator<string | any, void, unknown> {
+): AsyncGenerator<ChatStreamEvent, void, unknown> {
   let fullSystemInstruction = settings.systemInstruction || '';
   let identityParts = [];
 
@@ -117,10 +124,10 @@ export async function* streamChat(
             throw new APIError(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
           }
           if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog' || data.type === 'thought') {
-            yield data;
+            yield data as ChatStreamEvent;
           } else if (data.text) {
             fullText += data.text;
-            yield data.text;
+            yield { type: 'text', text: data.text };
           }
         } catch (e) {
           if (e instanceof RepetitionError || e instanceof APIError || e instanceof RateLimitError) throw e;

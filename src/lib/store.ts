@@ -23,7 +23,7 @@ export function useAppStore() {
           ...c,
           messages: c.messages?.filter((m: any) => 
             m.role === 'user' || 
-            (m.role === 'model' && m.parts?.some((p: any) => p.text || p.thought || p.functionCall))
+            (m.role === 'model' && (m.thoughtText?.trim() || m.parts?.some((p: any) => p.text || p.thought || p.functionCall)))
           ) || []
         }));
         setConversations(filtered);

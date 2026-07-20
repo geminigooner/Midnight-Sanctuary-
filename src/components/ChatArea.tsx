@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo } from '../lib/types';
-import { streamChat, RepetitionError, APIError, RateLimitError } from '../lib/gemini';
+import { streamChat, RepetitionError, APIError, RateLimitError, ChatStreamEvent } from '../lib/gemini';
 import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal, Gift, X } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
 import { Presence, PresenceState } from './Presence';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { getMotion } from '../lib/motion';
+import { ThoughtBubble } from './ThoughtBubble';
 
 export const triggerHaptic = (type: 'light' | 'medium' | 'heavy' = 'light') => {
   if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -105,11 +106,8 @@ function MessageBubble({
   const gemmaClasses = "bg-plum/30 backdrop-blur-xl border border-glass-border border-t-white/10 shadow-[0_4px_20px_rgba(244,232,211,0.03)] text-pearlescent";
 
   const textParts = msg.parts?.filter(p => !p.thought && p.text) || [];
-  const thoughtParts = msg.parts?.filter(p => p.thought) || [];
   const publicText = textParts.map(p => p.text).join('\n');
-  const thoughtText = thoughtParts.map(p => p.text).join('\n');
-  const isWaitingForToken = isGenerating && isLast && !isUser && !publicText && !thoughtText;
-  const [showThought, setShowThought] = useState(false);
+  const isWaitingForToken = isGenerating && isLast && !isUser && !publicText && !msg.thoughtText;
 
   const reducedMotion = useReducedMotion();
   const bubbleMotion = getMotion('standard', reducedMotion);
@@ -148,32 +146,20 @@ function MessageBubble({
           </div>
         ) : (
           <div className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-glass-border ${publicText.includes('[Generation stopped: repetition loop detected.]') ? 'text-copper/90' : ''}`}>
-            {isWaitingForToken ? (
-              <GemmaTypingIndicator />
-            ) : (
-              <>
-                {thoughtText && (
-                  <div className="mb-3 text-sm">
-                    <button 
-                      onClick={() => setShowThought(!showThought)}
-                      className="flex items-center gap-2 text-mauve hover:text-champagne transition-colors pb-1"
-                    >
-                      <span className="opacity-70 text-xs font-mono uppercase tracking-wider">Thought summary</span>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showThought ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    </button>
-                    {showThought && (
-                      <div className="p-3 bg-black/20 rounded-xl border border-white/5 mt-1 text-mauve whitespace-pre-wrap font-mono text-xs">
-                        {thoughtText}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {publicText && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-                    <Markdown>{publicText}</Markdown>
-                  </motion.div>
-                )}
-                {msg.parts?.map((part, i) => part.inlineData ? (
+            {(!isUser && (isWaitingForToken || Boolean(msg.thoughtText?.trim()) || msg.thoughtStatus === 'thinking')) && (
+              <ThoughtBubble
+                text={msg.thoughtText || ''}
+                status={msg.thoughtStatus ?? 'complete'}
+              />
+            )}
+            
+            {(publicText || (!isWaitingForToken && !msg.thoughtText)) && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                <Markdown>{publicText}</Markdown>
+              </motion.div>
+            )}
+
+            {msg.parts?.map((part, i) => part.inlineData ? (
                   <img 
                     key={i} 
                     src={`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`} 
@@ -182,8 +168,6 @@ function MessageBubble({
                     onClick={() => onImageClick?.(`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`)}
                   />
                 ) : null)}
-              </>
-            )}
           </div>
         )}
         
@@ -389,31 +373,49 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       let hasToolCalls = false;
       const generator = streamChat(newMessages, settings, gifts, abortControllerRef.current.signal);
       
-      newMessages.push({ id: modelMsgId, role: 'model', parts: [], timestamp: Date.now() });
+      newMessages.push({ 
+        id: modelMsgId, 
+        role: 'model', 
+        parts: [{ text: '' }],
+        thoughtText: '',
+        thoughtStatus: 'thinking',
+        timestamp: Date.now() 
+      });
       onUpdate(conversation.id, { messages: [...newMessages] });
 
-      const updateModelMessage = (text: string, thought: string) => {
-         let updatedParts = [];
-         if (text) updatedParts.push({ text: text });
-         if (thought) updatedParts.push({ text: thought, thought: true });
+      const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
+         let updatedParts = [{ text: text }];
          
          onUpdate(conversation.id, {
-           messages: newMessages.map(m => m.id === modelMsgId ? { ...m, parts: updatedParts } : m)
+           messages: newMessages.map(m => m.id === modelMsgId ? { 
+             ...m, 
+             parts: updatedParts,
+             thoughtText: thought,
+             thoughtStatus: status
+           } : m)
          });
       };
 
       for await (const chunk of generator) {
         if (typeof chunk === 'string') {
+          // Fallback if somehow a string leaks through
           if (isFirstChunk) {
             setPresence('responding');
             isFirstChunk = false;
           }
           currentModelText += chunk;
-          updateModelMessage(currentModelText, currentModelThought);
+          updateModelMessage(currentModelText, currentModelThought, 'complete');
         } else if (chunk && typeof chunk === 'object') {
           if (chunk.type === 'thought') {
             currentModelThought += chunk.text;
-            updateModelMessage(currentModelText, currentModelThought);
+            updateModelMessage(currentModelText, currentModelThought, 'thinking');
+          } else if (chunk.type === 'text') {
+            if (isFirstChunk) {
+              setPresence('responding');
+              isFirstChunk = false;
+            }
+            currentModelText += chunk.text;
+            updateModelMessage(currentModelText, currentModelThought, 'complete');
           } else if (chunk.type === 'gift') {
             hasToolCalls = true;
             onAddGift({
@@ -437,6 +439,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
            messages: newMessages.filter(m => m.id !== modelMsgId)
          });
       } else {
+        updateModelMessage(currentModelText, currentModelThought, 'complete');
         onUpdateJewel(prev => ({
           ...prev,
           totalMessages: prev.totalMessages + 1,
@@ -448,13 +451,14 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     } catch (e: any) {
       if (e.name === 'AbortError') {
          // It was aborted manually, keep what we have
+         updateModelMessage(currentModelText, currentModelThought, 'complete');
       } else if (e.name === 'RepetitionError') {
          currentModelText += e.message;
-         updateModelMessage(currentModelText, currentModelThought);
+         updateModelMessage(currentModelText, currentModelThought, 'complete');
          setTemporaryPresence('repetition_stopped', 'resting', 5000);
       } else if (e.name === 'RateLimitError') {
          currentModelText += `\n\n*${e.message}*`;
-         updateModelMessage(currentModelText, currentModelThought);
+         updateModelMessage(currentModelText, currentModelThought, 'complete');
          setTemporaryPresence('rate_limit', 'resting', 3000);
       } else {
          if (!currentModelText && !currentModelThought) {
@@ -464,7 +468,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
             setTemporaryPresence('error', 'resting', 5000);
          } else {
             currentModelText += `\n\n[Error: ${e.message}]`;
-            updateModelMessage(currentModelText, currentModelThought);
+            updateModelMessage(currentModelText, currentModelThought, 'error');
             setTemporaryPresence('error', 'resting', 5000);
          }
       }

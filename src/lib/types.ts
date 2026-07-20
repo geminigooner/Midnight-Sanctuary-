@@ -3,6 +3,8 @@ export interface Message {
   role: 'user' | 'model';
   parts: { text?: string; thought?: boolean; inlineData?: { mimeType: string; data: string } }[];
   timestamp: number;
+  thoughtText?: string;
+  thoughtStatus?: 'thinking' | 'complete' | 'error';
 }
 
 export interface Conversation {
