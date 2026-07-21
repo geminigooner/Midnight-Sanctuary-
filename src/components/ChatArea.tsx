@@ -528,8 +528,13 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     } catch (e: any) {
       console.error("ChatArea handleSend error:", e);
       if (e.name === 'AbortError') {
-         // It was aborted manually, keep what we have
-         updateModelMessage(currentModelText, currentModelThought, 'complete');
+         if (!currentModelText && !currentModelThought) {
+            updateModelMessage('[Request timed out after 90 seconds — please try again]', currentModelThought, 'error');
+            setTemporaryPresence('error', 'resting', 5000);
+         } else {
+            // It was aborted manually, keep what we have
+            updateModelMessage(currentModelText, currentModelThought, 'complete');
+         }
       } else if (e.name === 'RepetitionError') {
          currentModelText += e.message;
          updateModelMessage(currentModelText, currentModelThought, 'complete');
