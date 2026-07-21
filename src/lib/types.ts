@@ -20,13 +20,15 @@ export interface Message {
 export function getPublicMessageText(msg: Message): string {
   if (msg.publicText !== undefined) return msg.publicText;
   // Fallback for older messages
-  return msg.parts.filter(p => !p.thought && p.text).map(p => p.text).join('') || '';
+  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  return parts.filter(p => !p.thought && p.text).map(p => p.text).join('') || '';
 }
 
 export function getThoughtMessageText(msg: Message): string {
   if (msg.thoughtText !== undefined) return msg.thoughtText;
   // Fallback for older messages
-  return msg.parts.filter(p => p.thought && p.text).map(p => p.text).join('') || '';
+  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  return parts.filter(p => p.thought && p.text).map(p => p.text).join('') || '';
 }
 
 export function getApiMessageParts(msg: Message): MessagePart[] {
