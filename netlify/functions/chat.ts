@@ -13,12 +13,31 @@ export default async (req: Request) => {
   try {
     const reqBody = await req.json();
     const stream = createChatStream(reqBody, apiKey);
+    
+    // Fallback to JSON if streaming isn't natively supported on this Netlify tier
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    const events: any[] = [];
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+          try {
+            events.push(JSON.parse(line.substring(6)));
+          } catch (e) {
+            // ignore parse error
+          }
+        }
+      }
+    }
 
-    return new Response(stream, {
+    return new Response(JSON.stringify({ events }), {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        'Content-Type': 'application/json',
       }
     });
   } catch (err: any) {

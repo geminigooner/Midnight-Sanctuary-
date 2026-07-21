@@ -26,7 +26,8 @@ export type ChatStreamEvent =
   | { type: 'text'; text: string }
   | { type: 'gift'; content: string; gift_type: string; reason?: string }
   | { type: 'memory'; content: string; why_it_matters?: string }
-  | { type: 'eventLog'; description: string };
+  | { type: 'eventLog'; description: string }
+  | { type: 'history_append'; messages: any[] };
 
 export async function* streamChat(
   messages: Message[],
@@ -72,7 +73,7 @@ export async function* streamChat(
   const serializedMessages = messages
     .map(m => ({
       role: m.role,
-      parts: (m.parts || []).filter(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse)
+      parts: (m.parts || []).filter(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse || p.thoughtSignature)
     }))
     .filter(m => m.parts.length > 0)
     .reduce((acc, current) => {
@@ -108,6 +109,16 @@ export async function* streamChat(
     throw new Error(err.error || `API Error: ${response.status}`);
   }
 
+  if (response.headers.get('Content-Type')?.includes('application/json')) {
+    const data = await response.json();
+    if (data.events && Array.isArray(data.events)) {
+      for (const evt of data.events) {
+        yield evt as ChatStreamEvent;
+      }
+    }
+    return;
+  }
+
   const reader = response.body?.getReader();
   if (!reader) throw new Error("No response body");
   
@@ -140,7 +151,7 @@ export async function* streamChat(
           if (data.error) {
             throw new APIError(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
           }
-          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog' || data.type === 'thought') {
+          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog' || data.type === 'thought' || data.type === 'history_append') {
             yield data as ChatStreamEvent;
           } else if (data.text) {
             fullText += data.text;

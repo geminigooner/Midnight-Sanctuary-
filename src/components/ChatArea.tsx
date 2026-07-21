@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo, Gift as GiftType } from '../lib/types';
+import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo, Gift as GiftType, getPublicMessageText, getThoughtMessageText } from '../lib/types';
 import { streamChat, RepetitionError, APIError, RateLimitError, ChatStreamEvent } from '../lib/gemini';
 import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal, Gift, X, MoreVertical } from 'lucide-react';
 import Markdown from 'react-markdown';
@@ -105,9 +105,9 @@ function MessageBubble({
   const userClasses = "bg-obsidian/90 backdrop-blur-2xl border border-copper/30 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05)] text-champagne";
   const gemmaClasses = "bg-plum/30 backdrop-blur-xl border border-glass-border border-t-white/10 shadow-[0_4px_20px_rgba(244,232,211,0.03)] text-pearlescent";
 
-  const textParts = msg.parts?.filter(p => !p.thought && p.text) || [];
-  const publicText = textParts.map(p => p.text).join('\n');
-  const isWaitingForToken = isGenerating && isLast && !isUser && !publicText && !msg.thoughtText;
+  const publicText = getPublicMessageText(msg);
+  const thoughtText = getThoughtMessageText(msg);
+  const isWaitingForToken = isGenerating && isLast && !isUser && !publicText && !thoughtText;
 
   const reducedMotion = useReducedMotion();
   const bubbleMotion = getMotion('standard', reducedMotion);
@@ -146,14 +146,14 @@ function MessageBubble({
           </div>
         ) : (
           <div className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-glass-border prose-pre:overflow-x-auto min-w-0 max-w-none break-words [overflow-wrap:anywhere] ${publicText.includes('[Generation stopped: repetition loop detected.]') ? 'text-copper/90' : ''}`}>
-            {(!isUser && (isWaitingForToken || Boolean(msg.thoughtText?.trim()) || msg.thoughtStatus === 'thinking')) && (
+            {(!isUser && (isWaitingForToken || Boolean(thoughtText?.trim()) || msg.thoughtStatus === 'thinking')) && (
               <ThoughtBubble
-                text={msg.thoughtText || ''}
+                text={thoughtText || ''}
                 status={msg.thoughtStatus ?? 'complete'}
               />
             )}
             
-            {(publicText || (!isWaitingForToken && !msg.thoughtText)) && (
+            {(publicText || (!isWaitingForToken && !thoughtText)) && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
                 <Markdown>{publicText}</Markdown>
               </motion.div>
@@ -378,14 +378,19 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     setPresence('deep_thinking');
     abortControllerRef.current = new AbortController();
 
-    const modelMsgId = uuidv4();
+    let modelMsgId = uuidv4();
     let currentModelText = '';
     let currentModelThought = '';
     let isFirstChunk = true;
 
     const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
+       const newParts = [];
+       if (thought) newParts.push({ thought: true, text: thought });
+       if (text) newParts.push({ text: text });
+       
        onUpdateMessage(currentConv.id, modelMsgId, {
-         parts: [{ text: text }],
+         parts: newParts.length > 0 ? newParts : [{ text: '' }],
+         publicText: text,
          thoughtText: thought,
          thoughtStatus: status
        });
@@ -399,6 +404,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
         id: modelMsgId, 
         role: 'model', 
         parts: [{ text: '' }],
+        publicText: '',
         thoughtText: '',
         thoughtStatus: 'thinking',
         timestamp: Date.now() 
@@ -438,6 +444,36 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
           } else if (chunk.type === 'eventLog') {
             hasToolCalls = true;
             onAddEventLog(chunk.description);
+          } else if (chunk.type === 'history_append') {
+            const msgs = chunk.messages;
+            // The first message is the model's tool calls. Update our current modelMsgId with it
+            onUpdateMessage(currentConv.id, modelMsgId, {
+              parts: msgs[0].parts,
+              thoughtText: currentModelThought,
+              publicText: currentModelText,
+              thoughtStatus: 'complete'
+            });
+            // The second message is the user's function response. Add it
+            onAddMessage(currentConv.id, {
+              id: uuidv4(),
+              role: 'user',
+              parts: msgs[1].parts,
+              timestamp: Date.now()
+            });
+            // Reset for the next model response
+            modelMsgId = uuidv4();
+            currentModelText = '';
+            currentModelThought = '';
+            isFirstChunk = true;
+            onAddMessage(currentConv.id, {
+              id: modelMsgId,
+              role: 'model',
+              parts: [{ text: '' }],
+              publicText: '',
+              thoughtText: '',
+              thoughtStatus: 'thinking',
+              timestamp: Date.now()
+            });
           }
         }
       }
@@ -490,14 +526,14 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     if (conversation.messages.length < 2) return;
     const lastUserIndex = conversation.messages.map(m => m.role).lastIndexOf('user');
     if (lastUserIndex !== -1) {
-      handleSend(conversation.messages[lastUserIndex].parts?.[0]?.text || '', lastUserIndex);
+      handleSend(getPublicMessageText(conversation.messages[lastUserIndex]) || '', lastUserIndex);
     }
   };
 
   const handleCopy = (text: string) => navigator.clipboard.writeText(text);
 
   const exportMarkdown = () => {
-    const md = conversation.messages.map(m => `**${m.role === 'user' ? 'You' : 'Gemma'}**:\n${m.parts?.[0]?.text || ''}\n`).join('\n---\n\n');
+    const md = conversation.messages.map(m => `**${m.role === 'user' ? 'You' : 'Gemma'}**:\n${getPublicMessageText(m) || ''}\n`).join('\n---\n\n');
     try {
       const blob = new Blob([md], { type: 'text/markdown' });
       const url = URL.createObjectURL(blob);

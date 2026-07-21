@@ -9,8 +9,8 @@ interface ThoughtBubbleProps {
   initiallyOpen?: boolean;
 }
 
-export function ThoughtBubble({ text, status, initiallyOpen }: ThoughtBubbleProps) {
-  const [isOpen, setIsOpen] = useState(initiallyOpen ?? false);
+export function ThoughtBubble({ text, status }: ThoughtBubbleProps) {
+  const [isOpen, setIsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -28,14 +28,6 @@ export function ThoughtBubble({ text, status, initiallyOpen }: ThoughtBubbleProp
   };
 
   const hasText = text.trim().length > 0;
-  const hasAutoOpened = useRef(false);
-  
-  useEffect(() => {
-    if (hasText && !hasAutoOpened.current && status === 'thinking') {
-      setIsOpen(true);
-      hasAutoOpened.current = true;
-    }
-  }, [hasText, status]);
 
   return (
     <div className="mb-4 flex flex-col items-start w-full min-w-0 max-w-full">

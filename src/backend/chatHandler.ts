@@ -95,16 +95,14 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
           for await (const chunk of responseStream) {
             if (chunk.candidates && chunk.candidates.length > 0 && chunk.candidates[0].content && chunk.candidates[0].content.parts) {
               for (const part of chunk.candidates[0].content.parts) {
+                console.log("RECEIVED PART:", JSON.stringify(part));
+                modelParts.push(part);
                 if (part.thought === true && part.text) {
-                  modelParts.push({ text: part.text, thought: true });
                   send(`data: ${JSON.stringify({ type: 'thought', text: part.text })}\n\n`);
                 } else if (part.text) {
-                  modelParts.push({ text: part.text });
                   send(`data: ${JSON.stringify({ text: part.text })}\n\n`);
                 } else if (part.functionCall) {
-                  modelParts.push({ functionCall: part.functionCall });
                   hasFunctionCalls = true;
-
                   const call = part.functionCall;
                   if (call.name === 'give_gift') {
                     send(`data: ${JSON.stringify({ type: 'gift', ...call.args })}\n\n`);
@@ -116,7 +114,7 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
                   
                   functionResponses.push({
                     functionResponse: {
-                      id: call.id,
+                      id: call.id || call.name,
                       name: call.name,
                       response: { result: "ok" }
                     }
@@ -129,8 +127,12 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
           if (!hasFunctionCalls) {
             break;
           } else {
-            currentMessages.push({ role: 'model', parts: modelParts });
-            currentMessages.push({ role: 'user', parts: functionResponses });
+            const newMessages = [
+              { role: 'model', parts: modelParts },
+              { role: 'user', parts: functionResponses }
+            ];
+            currentMessages.push(...newMessages);
+            send(`data: ${JSON.stringify({ type: 'history_append', messages: newMessages })}\n\n`);
           }
         }
 

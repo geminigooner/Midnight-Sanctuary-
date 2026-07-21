@@ -1,16 +1,36 @@
+export interface MessagePart {
+  text?: string;
+  thought?: boolean;
+  inlineData?: { mimeType: string; data: string };
+  functionCall?: any;
+  functionResponse?: any;
+  thoughtSignature?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'model';
-  parts: { 
-    text?: string; 
-    thought?: boolean; 
-    inlineData?: { mimeType: string; data: string };
-    functionCall?: any;
-    functionResponse?: any;
-  }[];
+  parts: MessagePart[];
   timestamp: number;
+  publicText?: string;
   thoughtText?: string;
   thoughtStatus?: 'thinking' | 'complete' | 'error';
+}
+
+export function getPublicMessageText(msg: Message): string {
+  if (msg.publicText !== undefined) return msg.publicText;
+  // Fallback for older messages
+  return msg.parts.filter(p => !p.thought && p.text).map(p => p.text).join('') || '';
+}
+
+export function getThoughtMessageText(msg: Message): string {
+  if (msg.thoughtText !== undefined) return msg.thoughtText;
+  // Fallback for older messages
+  return msg.parts.filter(p => p.thought && p.text).map(p => p.text).join('') || '';
+}
+
+export function getApiMessageParts(msg: Message): MessagePart[] {
+  return msg.parts;
 }
 
 export interface Conversation {
