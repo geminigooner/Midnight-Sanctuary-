@@ -91,6 +91,7 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
           let modelParts: any[] = [];
           let functionResponses: any[] = [];
           let hasFunctionCalls = false;
+          let hasText = false;
 
           for await (const chunk of responseStream) {
             if (chunk.candidates && chunk.candidates.length > 0 && chunk.candidates[0].content && chunk.candidates[0].content.parts) {
@@ -100,6 +101,7 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
                 if (part.thought === true && part.text) {
                   send(`data: ${JSON.stringify({ type: 'thought', text: part.text })}\n\n`);
                 } else if (part.text) {
+                  hasText = true;
                   send(`data: ${JSON.stringify({ text: part.text })}\n\n`);
                 } else if (part.functionCall) {
                   hasFunctionCalls = true;
@@ -133,12 +135,12 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
             ];
             currentMessages.push(...newMessages);
             send(`data: ${JSON.stringify({ type: 'history_append', messages: newMessages })}\n\n`);
+            if (round >= maxRounds && !hasText) {
+              send(`data: ${JSON.stringify({ text: "*I wanted to do something quietly just then.*" })}\n\n`);
+            }
           }
         }
 
-        if (round >= maxRounds) {
-          send(`data: ${JSON.stringify({ error: "Function call limit exceeded (max 5 rounds)." })}\n\n`);
-        }
         send('data: [DONE]\n\n');
         controller.close();
       } catch (err: any) {

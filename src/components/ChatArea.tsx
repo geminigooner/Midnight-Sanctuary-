@@ -479,9 +479,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       }
       
       if (!currentModelText && !currentModelThought) {
-         onRemoveMessage(currentConv.id, modelMsgId);
-         // Add a system event log for the user to see the error
-         onAddEventLog("Gemma returned an empty response.");
+         updateModelMessage('[Gemma returned an empty response — check console/logs]', currentModelThought, 'complete');
       } else {
         updateModelMessage(currentModelText, currentModelThought, 'complete');
         onUpdateJewel(prev => ({
@@ -507,8 +505,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
          setTemporaryPresence('rate_limit', 'resting', 3000);
       } else {
          if (!currentModelText && !currentModelThought) {
-            onRemoveMessage(currentConv.id, modelMsgId);
-            onAddEventLog(`Error: ${e.message}`);
+            updateModelMessage(`[Error: ${e.message}]`, currentModelThought, 'error');
             setTemporaryPresence('error', 'resting', 5000);
          } else {
             currentModelText += `\n\n[Error: ${e.message}]`;
@@ -552,6 +549,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
        console.log('Copied to clipboard');
     }).catch(() => {});
   };
+
+  const visibleMessages = conversation.messages.filter(msg => {
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    return parts.some(p => typeof p.text === 'string' || p.thought || p.inlineData);
+  });
 
   return (
     <div className="flex-1 flex flex-col h-full bg-obsidian relative">
@@ -699,21 +701,21 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 space-y-6 custom-scrollbar z-10 scroll-smooth w-full min-w-0 max-w-full">
-        {conversation.messages.length === 0 && (
+        {visibleMessages.length === 0 && (
           <div className="h-full flex items-center justify-center opacity-50">
             <p className="text-mauve tracking-widest uppercase text-sm">The sanctuary is quiet.</p>
           </div>
         )}
         
         <AnimatePresence initial={false}>
-          {conversation.messages.map((msg, i) => (
+          {visibleMessages.map((msg, i) => (
             <MessageBubble 
               key={msg.id}
               msg={msg}
-              isLast={i === conversation.messages.length - 1}
+              isLast={i === visibleMessages.length - 1}
               isGenerating={isGenerating}
               onCopy={handleCopy}
-              onResend={(content) => handleSend(content, i)}
+              onResend={(content) => handleSend(content, conversation.messages.findIndex(m => m.id === msg.id))}
               onFavorite={(content) => {
                 onAddMemory(content, 'user_favorited');
                 onAddEventLog('User favorited a message.');
@@ -787,7 +789,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
                 </button>
               ) : (
                 <div className="flex items-center gap-1 mb-0.5 shrink-0">
-                  {conversation.messages.length > 0 && conversation.messages[conversation.messages.length-1].role === 'model' && (
+                  {visibleMessages.length > 0 && visibleMessages[visibleMessages.length-1].role === 'model' && (
                      <button onClick={handleRegenerate} className="hidden sm:block p-3 text-mauve hover:text-champagne hover:bg-white/10 rounded-xl transition-colors" title="Regenerate Last">
                        <RefreshCw size={20} />
                      </button>
