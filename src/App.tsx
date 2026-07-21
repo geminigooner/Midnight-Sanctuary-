@@ -62,6 +62,7 @@ export default function App() {
       </div>
       
       <ChatArea 
+        key={currentConversation?.id ?? 'no-conversation'}
         conversation={currentConversation}
         settings={store.settings}
         gifts={store.gifts}

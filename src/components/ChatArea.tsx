@@ -238,6 +238,8 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const presenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activeGenerationConversationIdRef = useRef<string | null>(null);
+  const watchdogTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const setTemporaryPresence = (newState: PresenceState, revertTo: PresenceState, delay: number = 3000) => {
     setPresence(newState);
@@ -246,6 +248,16 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       setPresence(revertTo);
     }, delay);
   };
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (presenceTimeoutRef.current) clearTimeout(presenceTimeoutRef.current);
+      if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isGenerating && presence !== 'error' && presence !== 'repetition_stopped' && presence !== 'complete') {
@@ -280,6 +292,8 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsGenerating(false);
+      activeGenerationConversationIdRef.current = null;
+      if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
       setTemporaryPresence('complete', input.trim().length > 0 ? 'listening' : 'resting');
     }
   };
@@ -331,8 +345,22 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   };
 
   const handleSend = async (textToAnalyse: string = input, replaceIndex?: number) => {
-    const currentConv = conversationRef.current;
-    if ((!textToAnalyse.trim() && attachments.length === 0) || isGenerating || !currentConv) return;
+    const requestConversationId = conversation?.id;
+
+    if (!requestConversationId) {
+      console.warn("handleSend blocked: No active conversation.");
+      return;
+    }
+
+    if (isGenerating) {
+      console.warn("handleSend blocked: Generation already in progress.");
+      return;
+    }
+
+    if (!textToAnalyse.trim() && attachments.length === 0) {
+      return;
+    }
+
     triggerHaptic('light');
 
     const now = Date.now();
@@ -353,11 +381,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       };
     });
 
-    let currentMessages = [...currentConv.messages];
+    let currentMessages = [...(conversation?.messages || [])];
     
     if (replaceIndex !== undefined) {
       currentMessages = currentMessages.slice(0, replaceIndex);
-      onUpdate(currentConv.id, { messages: currentMessages });
+      onUpdate(requestConversationId, { messages: currentMessages });
     }
     
     const parts: any[] = [];
@@ -366,9 +394,9 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     
     const userMsg: Message = { id: uuidv4(), role: 'user', parts, timestamp: now };
     currentMessages.push(userMsg);
-    onAddMessage(currentConv.id, userMsg);
+    onAddMessage(requestConversationId, userMsg);
     if (currentMessages.length === 1) {
-      onUpdate(currentConv.id, { title: textToAnalyse.slice(0, 30) });
+      onUpdate(requestConversationId, { title: textToAnalyse.slice(0, 30) });
     }
     
     setInput('');
@@ -377,6 +405,13 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     setIsGenerating(true);
     setPresence('deep_thinking');
     abortControllerRef.current = new AbortController();
+    activeGenerationConversationIdRef.current = requestConversationId;
+    
+    if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
+    watchdogTimeoutRef.current = setTimeout(() => {
+      console.warn("Watchdog timeout triggered. Aborting stuck stream.");
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+    }, 90000);
 
     let modelMsgId = uuidv4();
     let currentModelText = '';
@@ -388,7 +423,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
        if (thought) newParts.push({ thought: true, text: thought });
        if (text) newParts.push({ text: text });
        
-       onUpdateMessage(currentConv.id, modelMsgId, {
+       onUpdateMessage(requestConversationId, modelMsgId, {
          parts: newParts.length > 0 ? newParts : [{ text: '' }],
          publicText: text,
          thoughtText: thought,
@@ -400,7 +435,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       let hasToolCalls = false;
       const generator = streamChat(currentMessages, settings, gifts, abortControllerRef.current.signal);
       
-      onAddMessage(currentConv.id, { 
+      onAddMessage(requestConversationId, { 
         id: modelMsgId, 
         role: 'model', 
         parts: [{ text: '' }],
@@ -447,14 +482,14 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
           } else if (chunk.type === 'history_append') {
             const msgs = chunk.messages;
             // The first message is the model's tool calls. Update our current modelMsgId with it
-            onUpdateMessage(currentConv.id, modelMsgId, {
+            onUpdateMessage(requestConversationId, modelMsgId, {
               parts: msgs[0].parts,
               thoughtText: currentModelThought,
               publicText: currentModelText,
               thoughtStatus: 'complete'
             });
             // The second message is the user's function response. Add it
-            onAddMessage(currentConv.id, {
+            onAddMessage(requestConversationId, {
               id: uuidv4(),
               role: 'user',
               parts: msgs[1].parts,
@@ -465,7 +500,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
             currentModelText = '';
             currentModelThought = '';
             isFirstChunk = true;
-            onAddMessage(currentConv.id, {
+            onAddMessage(requestConversationId, {
               id: modelMsgId,
               role: 'model',
               parts: [{ text: '' }],
@@ -514,7 +549,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
          }
       }
     } finally {
-      setIsGenerating(false);
+      if (activeGenerationConversationIdRef.current === requestConversationId) {
+        setIsGenerating(false);
+        activeGenerationConversationIdRef.current = null;
+        if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
+      }
       abortControllerRef.current = null;
     }
   };
