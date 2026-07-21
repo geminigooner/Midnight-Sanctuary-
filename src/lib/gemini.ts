@@ -69,16 +69,28 @@ export async function* streamChat(
       : identityContext;
   }
 
+  const serializedMessages = messages
+    .map(m => ({
+      role: m.role,
+      parts: (m.parts || []).filter(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse)
+    }))
+    .filter(m => m.parts.length > 0)
+    .reduce((acc, current) => {
+      if (acc.length > 0 && acc[acc.length - 1].role === current.role) {
+        acc[acc.length - 1].parts.push(...current.parts);
+      } else {
+        acc.push(current);
+      }
+      return acc;
+    }, [] as any[]);
+
+  console.log("[Diagnostics] Sanitized API History:", JSON.stringify(serializedMessages, null, 2));
+
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: messages
-        .filter(m => m.parts && m.parts.some(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse))
-        .map(m => ({
-          role: m.role,
-          parts: m.parts.filter(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse)
-        })),
+      messages: serializedMessages,
       systemInstruction: fullSystemInstruction,
       temperature: settings.temperature,
       topP: settings.topP,
@@ -87,6 +99,9 @@ export async function* streamChat(
     }),
     signal: abortSignal
   });
+
+  console.log(`[Diagnostics] HTTP Status: ${response.status}`);
+  console.log(`[Diagnostics] Content-Type: ${response.headers.get('Content-Type')}`);
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));

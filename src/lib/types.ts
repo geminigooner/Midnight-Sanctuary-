@@ -1,7 +1,13 @@
 export interface Message {
   id: string;
   role: 'user' | 'model';
-  parts: { text?: string; thought?: boolean; inlineData?: { mimeType: string; data: string } }[];
+  parts: { 
+    text?: string; 
+    thought?: boolean; 
+    inlineData?: { mimeType: string; data: string };
+    functionCall?: any;
+    functionResponse?: any;
+  }[];
   timestamp: number;
   thoughtText?: string;
   thoughtStatus?: 'thinking' | 'complete' | 'error';

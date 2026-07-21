@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Conversation, AppSettings, DEFAULT_SETTINGS, JewelMetrics, DEFAULT_JEWEL_METRICS, ModelInfo, Gift } from './types';
+import { Conversation, AppSettings, DEFAULT_SETTINGS, JewelMetrics, DEFAULT_JEWEL_METRICS, ModelInfo, Gift, Message } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export function useAppStore() {

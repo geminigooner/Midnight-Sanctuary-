@@ -27,11 +27,24 @@ export function ThoughtBubble({ text, status, initiallyOpen }: ThoughtBubbleProp
     setAutoScroll(isScrolledToBottom);
   };
 
+  const hasText = text.trim().length > 0;
+  const hasAutoOpened = useRef(false);
+  
+  useEffect(() => {
+    if (hasText && !hasAutoOpened.current && status === 'thinking') {
+      setIsOpen(true);
+      hasAutoOpened.current = true;
+    }
+  }, [hasText, status]);
+
   return (
-    <div className="mb-4 flex flex-col items-start max-w-full">
+    <div className="mb-4 flex flex-col items-start w-full min-w-0 max-w-full">
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-obsidian/60 border border-copper/20 hover:border-copper/40 transition-all shadow-sm group"
+        onClick={() => {
+          if (hasText) setIsOpen(!isOpen);
+        }}
+        disabled={!hasText}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-obsidian/60 border border-copper/20 hover:border-copper/40 disabled:opacity-80 disabled:hover:border-copper/20 transition-all shadow-sm group"
       >
         <Brain size={14} className={`${status === 'thinking' ? 'animate-pulse text-copper' : 'text-mauve group-hover:text-champagne'}`} />
         <span className="text-xs font-mono tracking-wide text-mauve group-hover:text-champagne transition-colors">
@@ -44,10 +57,12 @@ export function ThoughtBubble({ text, status, initiallyOpen }: ThoughtBubbleProp
             <motion.span animate={{ opacity: [0, 1, 0] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1 h-1 bg-copper rounded-full" />
           </span>
         )}
-        {isOpen ? (
-          <ChevronUp size={14} className="text-mauve ml-1" />
-        ) : (
-          <ChevronDown size={14} className="text-mauve ml-1" />
+        {hasText && (
+          isOpen ? (
+            <ChevronUp size={14} className="text-mauve ml-1" />
+          ) : (
+            <ChevronDown size={14} className="text-mauve ml-1" />
+          )
         )}
       </button>
 
@@ -63,7 +78,7 @@ export function ThoughtBubble({ text, status, initiallyOpen }: ThoughtBubbleProp
             <div 
               ref={scrollRef}
               onScroll={handleScroll}
-              className="mt-2 max-h-[320px] overflow-y-auto p-4 rounded-2xl bg-plum/10 backdrop-blur-md border border-copper/10 text-xs font-mono text-mauve/90 whitespace-pre-wrap leading-relaxed shadow-inner"
+              className="mt-2 w-full max-h-[320px] overflow-y-auto p-4 rounded-2xl bg-plum/10 backdrop-blur-md border border-copper/10 text-xs font-mono text-mauve/90 whitespace-pre-wrap leading-relaxed shadow-inner break-words [overflow-wrap:anywhere]"
             >
               <Markdown>{text}</Markdown>
             </div>

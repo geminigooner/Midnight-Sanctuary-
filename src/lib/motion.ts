@@ -40,7 +40,7 @@ export const obsidianMotion = {
   }
 };
 
-export function getMotion(type: 'standard' | 'heavy' | 'snappy' = 'standard', reducedMotion: boolean | null = false) {
+export function getMotion(type: 'standard' | 'heavy' | 'snappy' = 'standard', reducedMotion: boolean | null = false): any {
   if (reducedMotion) return obsidianMotion.reduced;
   switch (type) {
     case 'heavy': return obsidianMotion.heavySpring;

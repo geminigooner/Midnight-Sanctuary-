@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo } from '../lib/types';
+import { Conversation, Message, AppSettings, JewelMetrics, ModelInfo, Gift as GiftType } from '../lib/types';
 import { streamChat, RepetitionError, APIError, RateLimitError, ChatStreamEvent } from '../lib/gemini';
-import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal, Gift, X } from 'lucide-react';
+import { Send, Settings as SettingsIcon, Menu, StopCircle, RefreshCw, Copy, Download, Edit3, Paperclip, Terminal, Gift, X, MoreVertical } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
 import { Presence, PresenceState } from './Presence';
@@ -125,27 +125,27 @@ function MessageBubble({
     >
       <div 
         {...bindLongPress}
-        className={`max-w-[85%] lg:max-w-[75%] p-4 rounded-3xl relative transition-all duration-300 select-text ${isUser ? userClasses : gemmaClasses}`}
+        className={`${isUser ? 'max-w-[88%] lg:max-w-[75%]' : 'max-w-[100%] lg:max-w-[90%]'} p-3 sm:p-4 rounded-3xl relative transition-all duration-300 select-text min-w-0 ${isUser ? userClasses : gemmaClasses}`}
         style={{
           boxShadow: settled ? (isUser ? 'inset 0 1px 2px rgba(255,255,255,0.05), 0 0 15px rgba(196,118,83,0.1)' : '0 4px 20px rgba(244,232,211,0.03), 0 0 20px rgba(244,232,211,0.1)') : undefined
         }}
       >
         {editing ? (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 w-full min-w-0">
             <textarea 
               value={editContent} 
               onChange={e => setEditContent(e.target.value)} 
-              className="w-full bg-black/40 border border-copper/30 rounded-xl p-3 text-base outline-none resize-none text-champagne"
+              className="w-full bg-black/40 border border-copper/30 rounded-xl p-3 text-base outline-none resize-none text-champagne min-w-0"
               rows={3}
               autoFocus
             />
             <div className="flex justify-end gap-3 mt-1">
-              <button onClick={() => setEditing(false)} className="text-sm text-mauve hover:text-champagne transition-colors">Cancel</button>
-              <button onClick={() => { setEditing(false); onResend?.(editContent); triggerHaptic('light'); }} className="text-sm text-copper font-medium hover:text-champagne transition-colors">Resend</button>
+              <button onClick={() => setEditing(false)} className="text-sm text-mauve hover:text-champagne transition-colors p-2">Cancel</button>
+              <button onClick={() => { setEditing(false); onResend?.(editContent); triggerHaptic('light'); }} className="text-sm text-copper font-medium hover:text-champagne transition-colors p-2">Resend</button>
             </div>
           </div>
         ) : (
-          <div className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-glass-border ${publicText.includes('[Generation stopped: repetition loop detected.]') ? 'text-copper/90' : ''}`}>
+          <div className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-glass-border prose-pre:overflow-x-auto min-w-0 max-w-none break-words [overflow-wrap:anywhere] ${publicText.includes('[Generation stopped: repetition loop detected.]') ? 'text-copper/90' : ''}`}>
             {(!isUser && (isWaitingForToken || Boolean(msg.thoughtText?.trim()) || msg.thoughtStatus === 'thinking')) && (
               <ThoughtBubble
                 text={msg.thoughtText || ''}
@@ -193,7 +193,7 @@ function MessageBubble({
 interface ChatAreaProps {
   conversation: Conversation | undefined;
   settings: AppSettings;
-  gifts: Gift[];
+  gifts: GiftType[];
   jewelMetrics: JewelMetrics;
   onUpdate: (id: string, updates: Partial<Conversation>) => void;
   onAddMessage: (conversationId: string, message: Message) => void;
@@ -215,10 +215,16 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   const [attachments, setAttachments] = useState<{mimeType: string, data: string, previewUrl?: string}[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  const conversationRef = useRef(conversation);
+  useEffect(() => {
+    conversationRef.current = conversation;
+  }, [conversation]);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [presence, setPresence] = useState<PresenceState>('resting');
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [showDevPanel, setShowDevPanel] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showDebugModel, setShowDebugModel] = useState(false);
   const [showLeaveGift, setShowLeaveGift] = useState(false);
   const [giftContent, setGiftContent] = useState('');
@@ -325,7 +331,8 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   };
 
   const handleSend = async (textToAnalyse: string = input, replaceIndex?: number) => {
-    if ((!textToAnalyse.trim() && attachments.length === 0) || isGenerating || !conversation) return;
+    const currentConv = conversationRef.current;
+    if ((!textToAnalyse.trim() && attachments.length === 0) || isGenerating || !currentConv) return;
     triggerHaptic('light');
 
     const now = Date.now();
@@ -346,11 +353,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       };
     });
 
-    let currentMessages = [...conversation.messages];
+    let currentMessages = [...currentConv.messages];
     
     if (replaceIndex !== undefined) {
       currentMessages = currentMessages.slice(0, replaceIndex);
-      onUpdate(conversation.id, { messages: currentMessages });
+      onUpdate(currentConv.id, { messages: currentMessages });
     }
     
     const parts: any[] = [];
@@ -359,9 +366,9 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     
     const userMsg: Message = { id: uuidv4(), role: 'user', parts, timestamp: now };
     currentMessages.push(userMsg);
-    onAddMessage(conversation.id, userMsg);
+    onAddMessage(currentConv.id, userMsg);
     if (currentMessages.length === 1) {
-      onUpdate(conversation.id, { title: textToAnalyse.slice(0, 30) });
+      onUpdate(currentConv.id, { title: textToAnalyse.slice(0, 30) });
     }
     
     setInput('');
@@ -373,14 +380,22 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
 
     const modelMsgId = uuidv4();
     let currentModelText = '';
+    let currentModelThought = '';
     let isFirstChunk = true;
 
+    const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
+       onUpdateMessage(currentConv.id, modelMsgId, {
+         parts: [{ text: text }],
+         thoughtText: thought,
+         thoughtStatus: status
+       });
+    };
+
     try {
-      let currentModelThought = '';
       let hasToolCalls = false;
       const generator = streamChat(currentMessages, settings, gifts, abortControllerRef.current.signal);
       
-      onAddMessage(conversation.id, { 
+      onAddMessage(currentConv.id, { 
         id: modelMsgId, 
         role: 'model', 
         parts: [{ text: '' }],
@@ -388,14 +403,6 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
         thoughtStatus: 'thinking',
         timestamp: Date.now() 
       });
-
-      const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
-         onUpdateMessage(conversation.id, modelMsgId, {
-           parts: [{ text: text }],
-           thoughtText: thought,
-           thoughtStatus: status
-         });
-      };
 
       for await (const chunk of generator) {
         if (typeof chunk === 'string') {
@@ -436,7 +443,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       }
       
       if (!currentModelText && !currentModelThought) {
-         onRemoveMessage(conversation.id, modelMsgId);
+         onRemoveMessage(currentConv.id, modelMsgId);
          // Add a system event log for the user to see the error
          onAddEventLog("Gemma returned an empty response.");
       } else {
@@ -464,7 +471,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
          setTemporaryPresence('rate_limit', 'resting', 3000);
       } else {
          if (!currentModelText && !currentModelThought) {
-            onRemoveMessage(conversation.id, modelMsgId);
+            onRemoveMessage(currentConv.id, modelMsgId);
             onAddEventLog(`Error: ${e.message}`);
             setTemporaryPresence('error', 'resting', 5000);
          } else {
@@ -515,11 +522,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-plum/10 via-obsidian/0 to-obsidian/0"></div>
       
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-glass-border bg-obsidian/80 backdrop-blur-md z-10 shrink-0">
-        <div className="flex items-center gap-3 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b border-glass-border bg-obsidian/80 backdrop-blur-md relative z-30 shrink-0 min-w-0">
+        <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
           <button onClick={onToggleSidebar} className="p-2 hover:bg-glass rounded-lg text-mauve shrink-0 lg:hidden"><Menu size={20} /></button>
           <Presence state={presence} />
-          <div className="flex flex-col overflow-hidden">
+          <div className="flex flex-col overflow-hidden flex-1 min-w-0">
             <span className="font-medium text-champagne truncate">
               {availableModels?.find(m => m.name === settings.model)?.displayName || settings.model?.split('/').pop() || 'Unknown Model'}
             </span>
@@ -528,7 +535,9 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
             </span>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-1 shrink-0 relative overflow-x-auto custom-scrollbar flex-nowrap min-w-0 pb-1">
+        
+        {/* Desktop Actions */}
+        <div className="hidden sm:flex items-center justify-end gap-1 shrink-0 relative">
           <button onClick={() => setShowDevPanel(!showDevPanel)} className={`p-2 shrink-0 hover:bg-glass rounded-lg transition-colors ${showDevPanel ? 'text-copper bg-glass' : 'text-mauve'}`} title="Developer Details">
             <Terminal size={18} />
           </button>
@@ -539,7 +548,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                className="absolute top-full right-0 mt-2 w-64 bg-ink/95 backdrop-blur-xl border border-glass-border rounded-xl p-4 shadow-2xl z-50 text-sm"
+                className="absolute top-full right-0 mt-2 w-64 bg-ink/95 backdrop-blur-xl border border-glass-border rounded-xl p-4 shadow-2xl z-50 text-sm max-w-[calc(100vw-1.5rem)]"
               >
                 <div className="flex flex-col gap-3">
                   <div className="flex justify-between items-center border-b border-glass-border pb-2">
@@ -583,10 +592,77 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
           <button onClick={exportMarkdown} className="p-2 shrink-0 hover:bg-glass rounded-lg text-mauve transition-colors" title="Export"><Download size={18} /></button>
           <button onClick={onOpenSettings} className="p-2 shrink-0 hover:bg-glass rounded-lg text-mauve transition-colors" title="Settings"><SettingsIcon size={18} /></button>
         </div>
+
+        {/* Mobile Actions */}
+        <div className="flex sm:hidden relative shrink-0">
+          <button onClick={() => setShowMobileMenu(!showMobileMenu)} className="p-2 hover:bg-glass rounded-lg text-mauve transition-colors">
+            <MoreVertical size={20} />
+          </button>
+          
+          <AnimatePresence>
+            {showMobileMenu && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                className="absolute top-full right-0 mt-2 w-48 bg-ink/95 backdrop-blur-xl border border-glass-border rounded-xl p-2 shadow-2xl z-50 text-base sm:text-sm max-w-[calc(100vw-1.5rem)] flex flex-col gap-1"
+              >
+                <button onClick={() => { setShowMobileMenu(false); setShowDevPanel(true); }} className="flex items-center gap-3 p-3 hover:bg-glass rounded-lg text-mauve transition-colors w-full text-left">
+                  <Terminal size={18} /> <span className="flex-1">Developer</span>
+                </button>
+                <button onClick={() => { setShowMobileMenu(false); onOpenGifts(); }} className="flex items-center gap-3 p-3 hover:bg-glass rounded-lg text-mauve transition-colors w-full text-left">
+                  <Gift size={18} /> <span className="flex-1">Gifts</span>
+                </button>
+                <button onClick={() => { setShowMobileMenu(false); onOpenJewel(); }} className="flex items-center gap-3 p-3 hover:bg-glass rounded-lg text-mauve transition-colors w-full text-left">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> <span className="flex-1">Jewel</span>
+                </button>
+                <button onClick={() => { setShowMobileMenu(false); exportMarkdown(); }} className="flex items-center gap-3 p-3 hover:bg-glass rounded-lg text-mauve transition-colors w-full text-left">
+                  <Download size={18} /> <span className="flex-1">Export</span>
+                </button>
+                <button onClick={() => { setShowMobileMenu(false); onOpenSettings(); }} className="flex items-center gap-3 p-3 hover:bg-glass rounded-lg text-mauve transition-colors w-full text-left">
+                  <SettingsIcon size={18} /> <span className="flex-1">Settings</span>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showDevPanel && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                className="absolute top-full right-0 mt-2 w-64 bg-ink/95 backdrop-blur-xl border border-glass-border rounded-xl p-4 shadow-2xl z-50 text-sm max-w-[calc(100vw-1.5rem)]"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex justify-between items-center border-b border-glass-border pb-2">
+                    <span className="text-mauve font-medium">Developer Details</span>
+                    <button onClick={() => setShowDevPanel(false)}><X size={14} className="text-copper" /></button>
+                  </div>
+                  
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Provider</span>
+                      <span className="text-pearlescent font-mono">Google</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Model ID</span>
+                      <span className="text-copper font-mono truncate max-w-[120px]">{settings.model}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-mauve/70">Endpoint</span>
+                      <span className="text-pearlescent font-mono truncate max-w-[120px]">/api/chat</span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar z-10 scroll-smooth">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 space-y-6 custom-scrollbar z-10 scroll-smooth w-full min-w-0 max-w-full">
         {conversation.messages.length === 0 && (
           <div className="h-full flex items-center justify-center opacity-50">
             <p className="text-mauve tracking-widest uppercase text-sm">The sanctuary is quiet.</p>
@@ -613,7 +689,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       </div>
 
       {/* Composer */}
-      <div className={`p-4 bg-obsidian/90 backdrop-blur-xl border-t border-glass-border z-10 transition-colors duration-500 ${presence === 'listening' ? 'shadow-[0_-10px_30px_rgba(244,232,211,0.03)]' : ''}`}>
+      <div className={`p-3 sm:p-4 bg-obsidian/90 backdrop-blur-xl border-t border-glass-border z-10 transition-colors duration-500 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${presence === 'listening' ? 'shadow-[0_-10px_30px_rgba(244,232,211,0.03)]' : ''}`}>
         <div className="max-w-4xl mx-auto relative">
           <motion.div 
             animate={{ 
@@ -647,10 +723,10 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
                 onChange={handleFileChange}
                 className="hidden" 
               />
-              <button onClick={() => fileInputRef.current?.click()} className="p-3 text-mauve/50 hover:text-mauve hover:bg-white/10 rounded-xl transition-colors mb-0.5" title="Attach Image">
+              <button onClick={() => fileInputRef.current?.click()} className="p-3 text-mauve/50 hover:text-mauve hover:bg-white/10 rounded-xl transition-colors mb-0.5 shrink-0" title="Attach Image">
                 <Paperclip size={20} />
               </button>
-              <button onClick={() => setShowLeaveGift(true)} className="p-3 text-mauve/50 hover:text-champagne hover:bg-white/10 rounded-xl transition-colors mb-0.5" title="Leave a Gift">
+              <button onClick={() => setShowLeaveGift(true)} className="p-3 text-mauve/50 hover:text-champagne hover:bg-white/10 rounded-xl transition-colors mb-0.5 shrink-0" title="Leave a Gift">
                 <Gift size={20} />
               </button>
               <textarea 
@@ -665,25 +741,25 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
                   }
                 }}
                 placeholder="Whisper to the void..."
-                className="flex-1 bg-transparent max-h-48 min-h-[44px] p-2 resize-none outline-none text-pearlescent placeholder-mauve/40 custom-scrollbar text-base"
+                className="flex-1 bg-transparent max-h-48 min-h-[44px] min-w-0 p-2 resize-none outline-none text-pearlescent placeholder-mauve/40 custom-scrollbar text-base"
                 rows={input.split('\n').length > 1 ? Math.min(input.split('\n').length, 5) : 1}
               />
               
               {isGenerating ? (
-                <button onClick={stopGeneration} className="p-3 text-red-400 hover:bg-white/10 rounded-xl transition-colors mb-0.5">
+                <button onClick={stopGeneration} className="p-3 text-red-400 hover:bg-white/10 rounded-xl transition-colors mb-0.5 shrink-0">
                   <StopCircle size={20} />
                 </button>
               ) : (
-                <div className="flex items-center gap-1 mb-0.5">
+                <div className="flex items-center gap-1 mb-0.5 shrink-0">
                   {conversation.messages.length > 0 && conversation.messages[conversation.messages.length-1].role === 'model' && (
-                     <button onClick={handleRegenerate} className="p-3 text-mauve hover:text-champagne hover:bg-white/10 rounded-xl transition-colors" title="Regenerate Last">
+                     <button onClick={handleRegenerate} className="hidden sm:block p-3 text-mauve hover:text-champagne hover:bg-white/10 rounded-xl transition-colors" title="Regenerate Last">
                        <RefreshCw size={20} />
                      </button>
                   )}
                   <button 
                     onClick={() => handleSend()} 
                     disabled={!input.trim() && attachments.length === 0}
-                    className="p-3 text-copper hover:text-champagne hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent rounded-xl transition-colors"
+                    className="p-3 text-copper hover:text-champagne hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent rounded-xl transition-colors shrink-0"
                   >
                     <Send size={20} />
                   </button>
