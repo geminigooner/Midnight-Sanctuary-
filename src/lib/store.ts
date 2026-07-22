@@ -150,12 +150,23 @@ export function useAppStore() {
   }, []);
 
   const updateConversation = useCallback((id: string, updates: Partial<Conversation>) => {
-    setConversations(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: Date.now() } : c));
+    setConversations(prev => prev.map(c => {
+      if (c.id === id) {
+        if (updates.messages && updates.messages.length === 0 && c.messages && c.messages.length > 0) {
+          console.warn("Blocked attempt to clear messages in updateConversation");
+          const safeUpdates = { ...updates };
+          delete safeUpdates.messages;
+          return { ...c, ...safeUpdates, updatedAt: Date.now() };
+        }
+        return { ...c, ...updates, updatedAt: Date.now() };
+      }
+      return c;
+    }));
   }, []);
 
   const addMessage = useCallback((conversationId: string, message: Message) => {
     setConversations(prev => prev.map(c => 
-      c.id === conversationId ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() } : c
+      c.id === conversationId ? { ...c, messages: [...(c.messages || []), message], updatedAt: Date.now() } : c
     ));
   }, []);
 
@@ -163,7 +174,16 @@ export function useAppStore() {
     setConversations(prev => prev.map(c => 
       c.id === conversationId ? { 
         ...c, 
-        messages: c.messages.map(m => m.id === messageId ? { ...m, ...updates } : m),
+        messages: (c.messages || []).map(m => {
+          if (m.id === messageId) {
+            const safeUpdates = { ...updates };
+            if (safeUpdates.parts && safeUpdates.parts.length === 0) {
+              safeUpdates.parts = [{ text: '' }];
+            }
+            return { ...m, ...safeUpdates };
+          }
+          return m;
+        }),
         updatedAt: Date.now() 
       } : c
     ));

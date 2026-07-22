@@ -221,6 +221,10 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   }, [conversation]);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const isGeneratingRef = useRef(false);
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
   const [presence, setPresence] = useState<PresenceState>('resting');
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [showDevPanel, setShowDevPanel] = useState(false);
@@ -352,8 +356,21 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       return;
     }
 
-    if (isGenerating) {
+    if (isGenerating || isGeneratingRef.current) {
       console.warn("handleSend blocked: Generation already in progress.");
+      triggerHaptic('heavy');
+      setInput(prev => prev); // trigger re-render
+      // Show an ephemeral toast or message in the UI so they know it's blocked
+      if (typeof window !== 'undefined') {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'fixed top-1/4 left-1/2 -translate-x-1/2 bg-rose text-white px-4 py-2 rounded-xl shadow-lg z-[9999] animate-in fade-in slide-in-from-top-4 duration-300';
+        errorDiv.innerText = "Gemma is still thinking...";
+        document.body.appendChild(errorDiv);
+        setTimeout(() => {
+          errorDiv.classList.add('animate-out', 'fade-out', 'slide-out-to-top-4');
+          setTimeout(() => errorDiv.remove(), 300);
+        }, 2000);
+      }
       return;
     }
 
@@ -383,9 +400,11 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
 
     let currentMessages = [...(conversation?.messages || [])];
     
-    if (replaceIndex !== undefined) {
+    if (replaceIndex !== undefined && replaceIndex > 0) {
       currentMessages = currentMessages.slice(0, replaceIndex);
       onUpdate(requestConversationId, { messages: currentMessages });
+    } else if (replaceIndex === 0) {
+      console.warn("handleSend blocked replaceIndex=0 to prevent clearing chat");
     }
     
     const parts: any[] = [];
@@ -407,16 +426,19 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     abortControllerRef.current = new AbortController();
     activeGenerationConversationIdRef.current = requestConversationId;
     
-    if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
-    watchdogTimeoutRef.current = setTimeout(() => {
-      console.warn("Watchdog timeout triggered. Aborting stuck stream.");
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-    }, 90000);
-
     let modelMsgId = uuidv4();
     let currentModelText = '';
     let currentModelThought = '';
     let isFirstChunk = true;
+
+    const resetIdleTimeout = () => {
+      if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
+      watchdogTimeoutRef.current = setTimeout(() => {
+        console.warn("Idle timeout triggered. Aborting stuck stream.");
+        if (abortControllerRef.current) abortControllerRef.current.abort();
+      }, 30000); // 30 seconds idle timeout
+    };
+    resetIdleTimeout();
 
     const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
        const newParts = [];
@@ -446,6 +468,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
       });
 
       for await (const chunk of generator) {
+        resetIdleTimeout();
         if (typeof chunk === 'string') {
           // Fallback if somehow a string leaks through
           if (isFirstChunk) {
@@ -554,7 +577,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
          }
       }
     } finally {
-      if (activeGenerationConversationIdRef.current === requestConversationId) {
+      if (true) {
         setIsGenerating(false);
         activeGenerationConversationIdRef.current = null;
         if (watchdogTimeoutRef.current) clearTimeout(watchdogTimeoutRef.current);
@@ -595,8 +618,24 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
   };
 
   const visibleMessages = conversation.messages.filter(msg => {
-    const parts = Array.isArray(msg.parts) ? msg.parts : [];
-    return parts.some(p => typeof p.text === 'string' || p.thought || p.inlineData);
+    if (!msg.parts || !Array.isArray(msg.parts)) return true;
+    
+    // Only hide explicit internal bookkeeping messages (tool calls without text)
+    const isToolCallOnly = msg.role === 'model' && msg.parts.length > 0 && msg.parts.every(p => p.functionCall && !p.text && !p.thought);
+    const isToolResponseOnly = msg.role === 'user' && msg.parts.length > 0 && msg.parts.every(p => p.functionResponse && !p.text);
+    
+    if (isToolCallOnly || isToolResponseOnly) return false;
+    
+    return true;
+  });
+  
+  console.log("ChatArea render:", { 
+    id: conversation.id,
+    allMessagesCount: conversation.messages.length, 
+    visibleCount: visibleMessages.length,
+    visibleIds: visibleMessages.map(m => m.id),
+    firstMsgParts: conversation.messages[0]?.parts,
+    lastMsgParts: conversation.messages[conversation.messages.length - 1]?.parts
   });
 
   return (
@@ -858,6 +897,16 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
               {showDebugModel ? settings.model : '·'}
             </button>
           </div>
+          
+          {showDebugModel && (
+            <div className="mt-4 p-4 bg-black/90 text-xs font-mono text-green-400 overflow-y-auto max-h-64 rounded-xl border border-green-500/30">
+              <strong>Diagnostics:</strong><br/>
+              Conversation ID: {conversation.id}<br/>
+              All Messages: {conversation.messages.length}<br/>
+              Visible Messages: {visibleMessages.length}<br/>
+              Data: {JSON.stringify(conversation.messages, null, 2)}
+            </div>
+          )}
         </div>
       </div>
 

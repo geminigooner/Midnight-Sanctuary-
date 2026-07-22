@@ -47,7 +47,12 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
 
   try {
-    const stream = createChatStream(req.body, apiKey);
+    const abortController = new AbortController();
+    req.on('close', () => {
+      abortController.abort();
+    });
+
+    const stream = createChatStream(req.body, apiKey, abortController.signal);
     const reader = stream.getReader();
     
     while (true) {

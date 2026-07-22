@@ -43,7 +43,7 @@ const gemmaTools = [
   },
 ];
 
-export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
+export function createChatStream(reqBody: any, apiKey: string, abortSignal?: AbortSignal): ReadableStream {
   const { messages, systemInstruction, temperature, topP, maxOutputTokens, model } = reqBody;
 
   if (!apiKey) {
@@ -62,9 +62,16 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
     async start(controller) {
       const encoder = new TextEncoder();
       const send = (data: string) => controller.enqueue(encoder.encode(data));
+      
+      const abortHandler = () => {
+         console.warn("Client disconnected, aborting generation...");
+         controller.close();
+      };
+      if (abortSignal) abortSignal.addEventListener('abort', abortHandler);
 
       try {
         while (round < maxRounds) {
+          if (abortSignal?.aborted) break;
           round++;
 
           const config: any = {
@@ -85,7 +92,10 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
           const responseStream = await ai.models.generateContentStream({
             model: model,
             contents: currentMessages,
-            config
+            config: {
+               ...config,
+               abortSignal
+            }
           });
 
           let modelParts: any[] = [];
@@ -145,12 +155,19 @@ export function createChatStream(reqBody: any, apiKey: string): ReadableStream {
         controller.close();
       } catch (err: any) {
         console.error('API Error:', err);
-        if (err?.status === 429 || (err.message && err.message.includes('429'))) {
-          send(`data: ${JSON.stringify({ type: 'rate_limit', message: 'Gemma needs a little breather — try again in a bit' })}\n\n`);
-        } else {
-          send(`data: ${JSON.stringify({ error: err.message || 'Unknown API Error' })}\n\n`);
+        try {
+          if (err?.status === 429 || (err.message && err.message.includes('429'))) {
+            send(`data: ${JSON.stringify({ type: 'rate_limit', message: 'Gemma needs a little breather — try again in a bit' })}\n\n`);
+          } else {
+            send(`data: ${JSON.stringify({ error: err.message || 'Unknown API Error' })}\n\n`);
+          }
+        } catch (sendErr) {
+          console.error('Error sending error chunk:', sendErr);
+        } finally {
+          controller.close();
         }
-        controller.close();
+      } finally {
+        if (abortSignal) abortSignal.removeEventListener('abort', abortHandler);
       }
     }
   });
