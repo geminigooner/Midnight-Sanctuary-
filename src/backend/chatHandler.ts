@@ -61,11 +61,26 @@ export function createChatStream(reqBody: any, apiKey: string, abortSignal?: Abo
   return new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
-      const send = (data: string) => controller.enqueue(encoder.encode(data));
+      let isClosed = false;
+      const send = (data: string) => {
+        if (!isClosed) {
+          try {
+            controller.enqueue(encoder.encode(data));
+          } catch (e) {
+            isClosed = true;
+          }
+        }
+      };
+      const safeClose = () => {
+        if (!isClosed) {
+          isClosed = true;
+          try { controller.close(); } catch (e) {}
+        }
+      };
       
       const abortHandler = () => {
          console.warn("Client disconnected, aborting generation...");
-         controller.close();
+         safeClose();
       };
       if (abortSignal) abortSignal.addEventListener('abort', abortHandler);
 
@@ -152,7 +167,7 @@ export function createChatStream(reqBody: any, apiKey: string, abortSignal?: Abo
         }
 
         send('data: [DONE]\n\n');
-        controller.close();
+        safeClose();
       } catch (err: any) {
         console.error('API Error:', err);
         try {
@@ -164,7 +179,7 @@ export function createChatStream(reqBody: any, apiKey: string, abortSignal?: Abo
         } catch (sendErr) {
           console.error('Error sending error chunk:', sendErr);
         } finally {
-          controller.close();
+          safeClose();
         }
       } finally {
         if (abortSignal) abortSignal.removeEventListener('abort', abortHandler);

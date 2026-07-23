@@ -48,8 +48,8 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const abortController = new AbortController();
-    req.on('close', () => {
-      abortController.abort();
+    res.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
     });
 
     const stream = createChatStream(req.body, apiKey, abortController.signal);
