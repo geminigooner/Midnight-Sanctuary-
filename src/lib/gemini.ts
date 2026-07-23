@@ -27,7 +27,8 @@ export type ChatStreamEvent =
   | { type: 'gift'; content: string; gift_type: string; reason?: string }
   | { type: 'memory'; content: string; why_it_matters?: string }
   | { type: 'eventLog'; description: string }
-  | { type: 'history_append'; messages: any[] };
+  | { type: 'history_append'; messages: any[] }
+  | { type: 'model_parts'; parts: any[] };
 
 export async function* streamChat(
   messages: Message[],
@@ -70,10 +71,25 @@ export async function* streamChat(
       : identityContext;
   }
 
+  const isGemma = settings.model.includes('gemma');
+
   const serializedMessages = messages
     .map(m => ({
       role: m.role,
-      parts: (m.parts || []).filter(p => (p.text && p.text.trim().length > 0) || p.thought || p.inlineData || p.functionCall || p.functionResponse || p.thoughtSignature)
+      parts: (m.parts || [])
+        .filter(p => {
+          if (p.text && p.text.trim().length > 0) return true;
+          if (p.inlineData || p.functionCall || p.functionResponse) return true;
+          if (isGemma && (p.thought || p.thoughtSignature)) return true;
+          return false;
+        })
+        .map(p => {
+          if (!isGemma) {
+            const { thought, thoughtSignature, ...rest } = p;
+            return rest;
+          }
+          return p;
+        })
     }))
     .filter(m => m.parts.length > 0)
     .reduce((acc, current) => {
@@ -151,7 +167,7 @@ export async function* streamChat(
           if (data.error) {
             throw new APIError(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
           }
-          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog' || data.type === 'thought' || data.type === 'history_append') {
+          if (data.type === 'gift' || data.type === 'memory' || data.type === 'eventLog' || data.type === 'thought' || data.type === 'history_append' || data.type === 'model_parts') {
             yield data as ChatStreamEvent;
           } else if (data.text) {
             fullText += data.text;

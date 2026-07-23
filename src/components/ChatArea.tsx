@@ -429,6 +429,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     let modelMsgId = uuidv4();
     let currentModelText = '';
     let currentModelThought = '';
+    let currentModelApiParts: any[] = [];
     let isFirstChunk = true;
 
     const resetIdleTimeout = () => {
@@ -441,16 +442,29 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     resetIdleTimeout();
 
     const updateModelMessage = (text: string, thought: string, status: 'thinking' | 'complete' | 'error') => {
-       const newParts = [];
-       if (thought) newParts.push({ thought: true, text: thought });
-       if (text) newParts.push({ text: text });
-       
-       onUpdateMessage(requestConversationId, modelMsgId, {
-         parts: newParts.length > 0 ? newParts : [{ text: '' }],
-         publicText: text,
-         thoughtText: thought,
-         thoughtStatus: status
-       });
+      const displayParts: any[] = [];
+      if (thought) {
+        displayParts.push({
+          thought: true,
+          text: thought,
+        });
+      }
+      if (text) {
+        displayParts.push({
+          text,
+        });
+      }
+      onUpdateMessage(requestConversationId, modelMsgId, {
+        parts:
+          currentModelApiParts.length > 0
+            ? currentModelApiParts
+            : displayParts.length > 0
+              ? displayParts
+              : [{ text: '' }],
+        publicText: text,
+        thoughtText: thought,
+        thoughtStatus: status,
+      });
     };
 
     try {
@@ -463,7 +477,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
         parts: [{ text: '' }],
         publicText: '',
         thoughtText: '',
-        thoughtStatus: 'thinking',
+        thoughtStatus: settings.model.includes('gemma') ? 'thinking' : 'complete',
         timestamp: Date.now() 
       });
 
@@ -502,26 +516,32 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
           } else if (chunk.type === 'eventLog') {
             hasToolCalls = true;
             onAddEventLog(chunk.description);
+          } else if (chunk.type === 'model_parts') {
+            currentModelApiParts = chunk.parts;
+            updateModelMessage(
+              currentModelText,
+              currentModelThought,
+              'complete'
+            );
           } else if (chunk.type === 'history_append') {
             const msgs = chunk.messages;
-            // The first message is the model's tool calls. Update our current modelMsgId with it
+            currentModelApiParts = msgs[0].parts;
             onUpdateMessage(requestConversationId, modelMsgId, {
-              parts: msgs[0].parts,
+              parts: currentModelApiParts,
               thoughtText: currentModelThought,
               publicText: currentModelText,
-              thoughtStatus: 'complete'
+              thoughtStatus: 'complete',
             });
-            // The second message is the user's function response. Add it
             onAddMessage(requestConversationId, {
               id: uuidv4(),
               role: 'user',
               parts: msgs[1].parts,
-              timestamp: Date.now()
+              timestamp: Date.now(),
             });
-            // Reset for the next model response
             modelMsgId = uuidv4();
             currentModelText = '';
             currentModelThought = '';
+            currentModelApiParts = [];
             isFirstChunk = true;
             onAddMessage(requestConversationId, {
               id: modelMsgId,
@@ -529,8 +549,8 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
               parts: [{ text: '' }],
               publicText: '',
               thoughtText: '',
-              thoughtStatus: 'thinking',
-              timestamp: Date.now()
+              thoughtStatus: settings.model.includes('gemma') ? 'thinking' : 'complete',
+              timestamp: Date.now(),
             });
           }
         }

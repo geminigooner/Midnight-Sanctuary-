@@ -152,6 +152,8 @@ export function createChatStream(reqBody: any, apiKey: string, abortSignal?: Abo
           }
 
           if (!hasFunctionCalls) {
+            // Preserve the exact API response, including thoughtSignature metadata.
+            send(`data: ${JSON.stringify({ type: 'model_parts', parts: modelParts })}\n\n`);
             break;
           } else {
             const newMessages = [
