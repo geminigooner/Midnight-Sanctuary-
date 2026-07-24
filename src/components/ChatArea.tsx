@@ -556,6 +556,16 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
         }
       }
       
+      if (!currentModelText.trim() && currentModelThought.trim()) {
+        currentModelText = currentModelThought.trim();
+        currentModelThought = '';
+      }
+
+      if (!currentModelText.trim() && currentModelThought.trim()) {
+        currentModelText = currentModelThought.trim();
+        currentModelThought = '';
+      }
+
       if (!currentModelText && !currentModelThought) {
          updateModelMessage('[Gemma returned an empty response — check console/logs]', currentModelThought, 'complete');
       } else {
