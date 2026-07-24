@@ -45,7 +45,7 @@ function GemmaTypingIndicator() {
   );
 }
 
-function MessageBubble({ 
+const MessageBubble = React.memo(function MessageBubble({ 
   msg, 
   isLast, 
   isGenerating, 
@@ -188,7 +188,7 @@ function MessageBubble({
       </div>
     </motion.div>
   );
-}
+}, (prev, next) => prev.msg === next.msg && prev.isLast === next.isLast && prev.isGenerating === next.isGenerating);
 
 interface ChatAreaProps {
   conversation: Conversation | undefined;
@@ -556,17 +556,7 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
         }
       }
       
-      if (!currentModelText.trim() && currentModelThought.trim()) {
-        currentModelText = currentModelThought.trim();
-        currentModelThought = '';
-      }
-
-      if (!currentModelText.trim() && currentModelThought.trim()) {
-        currentModelText = currentModelThought.trim();
-        currentModelThought = '';
-      }
-
-      if (!currentModelText && !currentModelThought) {
+      if (!currentModelText && !currentModelThought && !hasToolCalls) {
          updateModelMessage('[Gemma returned an empty response — check console/logs]', currentModelThought, 'complete');
       } else {
         updateModelMessage(currentModelText, currentModelThought, 'complete');
@@ -624,7 +614,8 @@ export function ChatArea({ conversation, settings, gifts, jewelMetrics, onUpdate
     }
   };
 
-  const handleCopy = (text: string) => navigator.clipboard.writeText(text);
+  const handleCopy = useCallback((text: string) => { navigator.clipboard.writeText(text); }, []);
+  const handleOpenImage = useCallback((url: string) => { setSelectedImage(url); }, []);
 
   const exportMarkdown = () => {
     const md = conversation.messages.map(m => `**${m.role === 'user' ? 'You' : 'Gemma'}**:\n${getPublicMessageText(m) || ''}\n`).join('\n---\n\n');
